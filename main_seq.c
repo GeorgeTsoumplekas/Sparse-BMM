@@ -20,7 +20,7 @@ int main(void) {
 
     // print_csr(A);
     // print_csc(B);
-    // print_csc(F);
+     print_csc(F);
 
     // Start timer
     clock_gettime(CLOCK_MONOTONIC, &begin);
@@ -48,13 +48,11 @@ int main(void) {
     free_matrix_2d(a);
     free_matrix_2d(b);
     free_matrix_2d(f);
-    // free_matrix_2d(c);
 
-    free_compressed(A);
-    free_compressed(B);
-    free_compressed(F);
-    free_compressed(C);
-    // free_compressed(c_);
+    free_comp_matrix(A);
+    free_comp_matrix(B);
+    free_comp_matrix(F);
+    free_comp_matrix(C);
 
     return 0;
 }

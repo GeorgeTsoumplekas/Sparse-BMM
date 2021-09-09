@@ -140,9 +140,9 @@ matrix_2d *bmm_seq_2d(matrix_2d *A, matrix_2d *B) {
     int cols = B->cols;
 
     // Initialize the matrix that holds the product
-    int **C = (int **)malloc(rows * sizeof(int *));
-    for (int i = 0; i < rows; i++) {
-        C[i] = (int *)malloc(cols * sizeof(int));
+    uint32_t **C = (uint32_t **)malloc(rows * sizeof(uint32_t *));
+    for (uint32_t i = 0; i < rows; i++) {
+        C[i] = (uint32_t *)malloc(cols * sizeof(uint32_t));
     }
 
     // Run every element of the matrix C
@@ -160,6 +160,10 @@ matrix_2d *bmm_seq_2d(matrix_2d *A, matrix_2d *B) {
     }
 
     matrix_2d *c_mat = (matrix_2d *)malloc(sizeof(matrix_2d));
+    if(c_mat == NULL){
+        printf("Couldn't allocate memory for c_mat in bmm_seq_2d.\n");
+        exit(-1);
+    }
     c_mat->cols = cols;
     c_mat->rows = rows;
     c_mat->mat = C;
