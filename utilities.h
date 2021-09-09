@@ -24,16 +24,22 @@ typedef struct {
 } comp_matrix;
 
 typedef struct {
-    int** mat;
-    int rows;
-    int cols;
+    uint32_t** mat;
+    uint32_t rows;
+    uint32_t cols;
 } matrix_2d;
 
 /* ......   Functions   ......*/
 // Functions for the comp_matrix struct
+
+//Create a comp matrix struct
 comp_matrix* new_comp_matrix(uint32_t nnz, uint32_t n, char* type) {
+
     comp_matrix* array = (comp_matrix*)malloc(sizeof(comp_matrix));
-    if (array == NULL) exit(-1);
+    if (array == NULL){
+        printf("Couldn't allocate memory for array in new_comp_matrix.\n");
+        exit(-1);
+    } 
 
     if (!strcmp(type, "csc")) {
         array->col = (uint32_t*)malloc((n + 1) * sizeof(uint32_t));
@@ -46,15 +52,18 @@ comp_matrix* new_comp_matrix(uint32_t nnz, uint32_t n, char* type) {
     }
 
     if (array->col == NULL || array->row == NULL) {
+        printf("Couldn't allocate memory for array->col or array->row in new_comp_matrix.\n");
         free(array);
         exit(-1);
     }
 
     array->nnz = nnz;
     array->n = n;
+
+    return array;
 }
 
-void free_compressed(comp_matrix* array) {
+void free_comp_matrix(comp_matrix* array) {
     free(array->col);
     free(array->row);
     free(array);
@@ -64,22 +73,35 @@ void free_compressed(comp_matrix* array) {
 // Creates a random 2d matrix
 matrix_2d* rand_matrix_2d(int rows, int cols) {
     matrix_2d* array = (matrix_2d*)malloc(sizeof(matrix_2d));
-    if (array == NULL) exit(-1);
+    if (array == NULL){
+        printf("Couldn't allocate memory for array in rand_matrix_2d\n");
+        exit(-1);
+    } 
 
-    int** matrix = (int**)malloc(rows * sizeof(int*));
-    for (int i = 0; i < rows; i++) {
-        matrix[i] = (int*)malloc(cols * sizeof(int));
+    array->mat = (uint32_t**)malloc(rows * sizeof(uint32_t*));
+    if (array->mat == NULL){
+        printf("Couldn't allocate memory for array->mat in rand_matrix_2d\n");
+        exit(-1);
+    }
+
+    for (uint32_t i = 0; i < rows; i++) {
+        array->mat[i] = (uint32_t*)malloc(cols * sizeof(uint32_t));
+        if (array->mat[i] == NULL){
+            printf("Couldn't allocate memory for array->mat[%d] in rand_matrix_2d\n",i);
+            exit(-1);
+        }   
     }
 
     for (int i = 0; i < rows; i++) {
         for (int j = 0; j < cols; j++) {
-            matrix[i][j] = rand() % 2;
+            array->mat[i][j] = (uint32_t)(rand() % 2);
         }
     }
 
-    array->mat = matrix;
     array->cols = cols;
     array->rows = rows;
+
+    return array;
 }
 
 void free_matrix_2d(matrix_2d* array) {
@@ -107,7 +129,9 @@ comp_matrix* matrix2csc(matrix_2d* array) {
     // Find the number of the non zero elements
     for (int i = 0; i < array->rows; i++) {
         for (int j = 0; j < array->cols; j++) {
-            if (array->mat[i][j] != 0) nnz++;
+            if (array->mat[i][j] != 0){
+                nnz++;
+            } 
         }
     }
 
@@ -138,7 +162,9 @@ comp_matrix* matrix2csr(matrix_2d* array) {
     // Find the number of the non zero elements
     for (int i = 0; i < array->rows; i++) {
         for (int j = 0; j < array->cols; j++) {
-            if (array->mat[i][j] != 0) nnz++;
+            if (array->mat[i][j] != 0){
+                nnz++;
+            }
         }
     }
 
