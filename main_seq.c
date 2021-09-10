@@ -3,8 +3,8 @@
 int main(void) {
     struct timespec begin, end;
     srand(time(NULL));
-    matrix_2d *a = rand_matrix_2d(5000, 5000);
-    matrix_2d *b = rand_matrix_2d(5000, 5000);
+    matrix_2d *a = rand_matrix_2d(50000, 50000);
+    matrix_2d *b = rand_matrix_2d(50000, 50000);
     matrix_2d *f = rand_matrix_2d(3, 3);
 
     // print_matrix_2d(a);
@@ -36,6 +36,7 @@ int main(void) {
 
     // printf("I'm C\n");
     // print_csc(C);
+
 
     // matrix_2d *c = bmm_seq_2d(a, b);
     // comp_matrix *c_ = matrix2csc(c);

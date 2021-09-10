@@ -170,3 +170,66 @@ matrix_2d *bmm_seq_2d(matrix_2d *A, matrix_2d *B) {
 
     return c_mat;
 }
+
+/**
+ * Function that mulitplies two matrices A and B.
+ * A is in blocked csr format and B is in blocked csc format
+ * Matrix C = A*B is in csr blocked format.
+**/
+block_comp_matrix* blocked_bmm_seq(block_comp_matrix* A, block_comp_matrix* B){
+
+    block_comp_matrix* C = (block_comp_matrix*)malloc(sizeof(block_comp_matrix));
+    if(C==NULL){
+        printf("Couldn't allocate memory for C in blocked_bmm_seq.\n");
+        exit(-1);
+    }
+
+    C->nb = A->nb;
+    C->b = A->b;
+
+    uint32_t block_row_start;   //First non-zero block in this row of blocks
+    uint32_t block_row_end;     //Last non-zero block in this row of blocks
+
+    uint32_t block_col_start;   //First non-zero block in this column of blocks
+    uint32_t block_col_end;     //Last non-zero block in this column of blocks
+
+    uint32_t block_row_ptr;     //Iterator through the non-zero blocks of a row of blocks
+    uint32_t block_col_ptr;     //Iterator through the non-zero blocks of a column of blocks
+
+    //for each row of blocks in A
+    for(uint32_t i=0;i<A->nb;++i){
+        block_row_start = A->line_blocks[i];
+        block_row_end = A->line_blocks[i+1];
+
+        //for each column of blocks in B
+        for(uint32_t j=0;j<B->nb;++j){
+            block_col_start = B->line_blocks[j];
+            block_col_end = B->line_blocks[j+1];
+
+            block_row_ptr = block_row_start;
+            block_col_ptr = block_col_start;
+
+            //while there are still non-zero blocks in the row of blocks in A or the column of blocks in B
+            while(block_row_ptr<block_row_end && block_col_ptr<block_col_end){
+                //search for blocks in A with the same col index as the row index of the blocks in B
+                if(block_row_ptr>block_col_ptr){
+                    block_col_ptr++;
+                }
+                else if(block_row_ptr<block_col_ptr){
+                    block_row_ptr++;
+                }
+                else{
+                    //TODO: pollaplasiasmos twn block pinakwn gia tous opoious exoume antistoixish//
+                    block_col_ptr++;
+                    block_row_ptr++;                
+                }
+            }
+        }
+    }
+    //TODO: elegxos orthotitas molis oloklhrwthei h blocked_bmm_seq
+    //TODO: blocked_bmm_seq_filtered
+    //TODO: sunartish pou metatrepei apo blocked se mh blocked morfh
+
+
+    return C;
+}
