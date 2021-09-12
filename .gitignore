@@ -1,2 +1,4 @@
 valgrind*
 test*
+matrices/
+.vscode/
