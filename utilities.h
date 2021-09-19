@@ -29,6 +29,8 @@ typedef struct {
     uint32_t cols;
 } matrix_2d;
 
+
+//an olapane kala auto tha parei podi
 typedef struct {
     uint32_t* col;
     uint32_t* row;
@@ -40,6 +42,14 @@ typedef struct {
     uint32_t total_nnz;
     uint32_t nnz_blocks;
 } block_comp_matrix;
+
+typedef struct {
+    comp_matrix** blocks;
+    uint32_t* block_row;
+    uint32_t* block_col;
+    uint32_t nnz_blocks;
+    uint32_t n_b;
+} block_comp_matrix_2;
 
 /* ......   Functions   ......*/
 // Functions for the comp_matrix struct
@@ -227,6 +237,9 @@ void print_csr(comp_matrix* array) {
     printf("\n");
 }
 
+//an ola pane kala me tous neous blocked auta tha paroun podi
+
+/*
 //Function that takes a matrix in csr format and creates its blocked csr format.
 //b is the size of each block
 block_comp_matrix* extract_blocked_csr(comp_matrix* array,uint32_t b){
@@ -538,5 +551,552 @@ void free_blocked_comp_matrix(block_comp_matrix* blocked_csr){
     free(blocked_csr->line_blocks);
     free(blocked_csr);
 }
+*/
+
+block_comp_matrix_2* csr_to_blocked(comp_matrix* array,uint32_t b){
+    //number of blocks in each dimension(both zero and non-zero blocks included)
+    uint32_t n_b = (array->n)/b;
+
+    uint32_t* nnz = (uint32_t*)calloc(pow(n_b,2),sizeof(uint32_t));
+    if (nnz == NULL){
+        printf("Couldn't allocate memory for nnz in csr_to_blocked.\n");
+        exit(-1);
+    }
+
+    uint32_t* col = (uint32_t*)calloc(array->nnz,sizeof(uint32_t));
+    if (col == NULL){
+        printf("Couldn't allocate memory for col in csr_to_blocked.\n");
+        exit(-1);
+    }
+
+    uint32_t* row = (uint32_t*)calloc((b+1)*pow(n_b,2),sizeof(uint32_t));
+    if (row == NULL){
+        printf("Couldn't allocate memory for row in csr_to_blocked.\n");
+        exit(-1);
+    }
+
+    uint32_t* block_row = (uint32_t*)calloc(n_b+1,sizeof(uint32_t));
+    if(block_row == NULL){
+        printf("Couldn't allocate memory for block_row in csr_to_blocked.\n");
+        exit(-1);
+    }
+
+    uint32_t* block_col = (uint32_t*)malloc(pow(n_b,2)*sizeof(uint32_t));
+    if(block_row == NULL){
+        printf("Couldn't allocate memory for block_col in csr_to_blocked.\n");
+        exit(-1);
+    }
+
+    uint32_t nnz_in_block;      //number of non-zero elements in each block
+    uint32_t nnz_in_row;        //number of non-zero blocks in each row of blocks  
+    uint32_t nnz_found = 0;     //number of non-zero elements we have found until this point
+    uint32_t nnz_blocks_count = 0; //number of blocks with non-zero elements
+
+    //First 2 for loops to check all blocks
+    for(uint32_t i=0;i<n_b;++i){
+        nnz_in_row = 0;
+        for(uint32_t j=0;j<n_b;++j){
+            nnz_in_block = 0;
+            
+            //for each row included in the block
+            for(uint32_t k=0;k<b;++k){
+                //for each non-zero element of the row
+                for(uint32_t l=array->row[i*b+k];l<array->row[i*b+k+1];++l){
+                    //the non-zero element belongs to a following block in this row of blocks
+                    if(array->col[l]>=(j+1)*b){
+                        break;
+                    }
+                    //the non-zero element belongs to this block
+                    else if(array->col[l]>=j*b){
+                        nnz_in_block++;
+                        col[nnz_found] = array->col[l];
+                        nnz_found++;
+                    }
+                    //the non-zero element belongs to a previous block in this row of blocks
+                    else{
+                        continue;
+                    }
+                }
+
+                row[nnz_blocks_count*(b+1)+k+1] = nnz_in_block;
+            }
+            
+            //we have a non-zero block
+            if(nnz_in_block>0){
+                block_col[nnz_blocks_count] = j;
+                nnz[nnz_blocks_count] = nnz_in_block;
+                nnz_blocks_count++;
+                nnz_in_row++;
+            }
+        }
+
+        block_row[i+1] = block_row[i] + nnz_in_row;
+    }
+    
+    //readjust the length of the arrays that depend on the number of non-zero blocks
+    nnz = realloc(nnz,nnz_blocks_count * sizeof(uint32_t));
+    if(nnz == NULL){
+        printf("Couldn't reallocate memory for nnz in csr_to_blocked.\n");
+        exit(-1);
+    }
+
+    block_col = realloc(block_col, nnz_blocks_count * sizeof(uint32_t));
+    if(block_col == NULL){
+        printf("Couldn't reallocate memory for block_col in csr_to_blocked.\n");
+        exit(-1);
+    }
+
+    row = realloc(row,nnz_blocks_count *(b + 1)*sizeof(uint32_t));
+    if(row == NULL){
+        printf("Couldn't reallocate memory for row in csr_to_blocked.\n");
+        exit(-1);
+    } 
+
+    block_comp_matrix_2* blocked_matrix = (block_comp_matrix_2*)malloc(sizeof(block_comp_matrix_2));
+    if(blocked_matrix == NULL){
+        printf("Couldn't allocate memory for blocked_matrix in csr_to_blocked.\n");
+        exit(-1);
+    }   
+
+    blocked_matrix->n_b = n_b;
+    blocked_matrix->nnz_blocks = nnz_blocks_count;
+    blocked_matrix->block_col = block_col;
+    blocked_matrix->block_row = block_row;
+
+    nnz_found = 0;
+
+    blocked_matrix->blocks = (comp_matrix**)malloc(nnz_blocks_count*sizeof(comp_matrix*));
+    if(blocked_matrix->blocks == NULL){
+        printf("Couldn't allocate memory for blocks in csr_to_blocked.\n");
+        exit(-1);
+    }
+
+    for(int i=0;i<nnz_blocks_count;++i){
+        blocked_matrix->blocks[i] = (comp_matrix*)malloc(sizeof(comp_matrix));
+        if(blocked_matrix->blocks[i] == NULL){
+            printf("Couldn't allocate memory for blocks[%d] in csr_to_blocked.\n", i);
+            exit(-1);
+        }
+        blocked_matrix->blocks[i]->n = b;
+        blocked_matrix->blocks[i]->nnz = nnz[i];
+        
+        blocked_matrix->blocks[i]->col = (uint32_t*)malloc(nnz[i]*sizeof(uint32_t));
+        if(blocked_matrix->blocks[i]->col == NULL){
+            printf("Couldn't allocate memory for blocks[%d]->col in csr_to_blocked.\n", i);
+            exit(-1);    
+        }
+        for(int j=0;j<nnz[i];++j){
+            blocked_matrix->blocks[i]->col[j] = col[nnz_found+j];
+        }
+        nnz_found += nnz[i];
+
+        blocked_matrix->blocks[i]->row = (uint32_t*)malloc((b+1)*sizeof(uint32_t));
+        if(blocked_matrix->blocks[i]->row == NULL){
+            printf("Couldn't allocate memory for blocks[%d]->row in csr_to_blocked.\n", i);
+            exit(-1);    
+        }
+        for(int j=0;j<b+1;++j){
+            blocked_matrix->blocks[i]->row[j] = row[i*(b+1)+j];
+        }
+    }
+
+    free(row);
+    free(col);
+    free(nnz);
+
+    return blocked_matrix;
+}
+
+block_comp_matrix_2* csc_to_blocked(comp_matrix* array,uint32_t b){
+    //number of blocks in each dimension(both zero and non-zero blocks included)
+    uint32_t n_b = (array->n)/b;
+
+    uint32_t* nnz = (uint32_t*)calloc(pow(n_b,2),sizeof(uint32_t));
+    if (nnz == NULL){
+        printf("Couldn't allocate memory for nnz in csc_to_blocked.\n");
+        exit(-1);
+    }
+
+    uint32_t* row = (uint32_t*)calloc(array->nnz,sizeof(uint32_t));
+    if (row == NULL){
+        printf("Couldn't allocate memory for row in csc_to_blocked.\n");
+        exit(-1);
+    }
+
+    uint32_t* col = (uint32_t*)calloc((b+1)*pow(n_b,2),sizeof(uint32_t));
+    if (col == NULL){
+        printf("Couldn't allocate memory for col in csc_to_blocked.\n");
+        exit(-1);
+    }
+
+    uint32_t* block_col = (uint32_t*)calloc(n_b+1,sizeof(uint32_t));
+    if(block_col == NULL){
+        printf("Couldn't allocate memory for block_col in csc_to_blocked.\n");
+        exit(-1);
+    }
+
+    uint32_t* block_row = (uint32_t*)malloc(pow(n_b,2)*sizeof(uint32_t));
+    if(block_row == NULL){
+        printf("Couldn't allocate memory for block_row in csc_to_blocked.\n");
+        exit(-1);
+    }
+
+    uint32_t nnz_in_block;      //number of non-zero elements in each block
+    uint32_t nnz_in_col;        //number of non-zero blocks in each row of blocks  
+    uint32_t nnz_found = 0;     //number of non-zero elements we have found until this point
+    uint32_t nnz_blocks_count = 0; //number of blocks with non-zero elements
+
+    //First 2 for loops to check all blocks
+    for(uint32_t i=0;i<n_b;++i){
+        nnz_in_col = 0;
+        for(uint32_t j=0;j<n_b;++j){
+            nnz_in_block = 0;
+            
+            //for each row included in the block
+            for(uint32_t k=0;k<b;++k){
+                //for each non-zero element of the column
+                for(uint32_t l=array->col[i*b+k];l<array->col[i*b+k+1];++l){
+                    //the non-zero element belongs to a following block in this column of blocks
+                    if(array->row[l]>=(j+1)*b){
+                        break;
+                    }
+                    //the non-zero element belongs to this block
+                    else if(array->row[l]>=j*b){
+                        nnz_in_block++;
+                        row[nnz_found] = array->row[l];
+                        nnz_found++;
+                    }
+                    //the non-zero element belongs to a previous block in this column of blocks
+                    else{
+                        continue;
+                    }
+                }
+
+                col[nnz_blocks_count*(b+1)+k+1] = nnz_in_block;
+            }
+            
+            //we have a non-zero block
+            if(nnz_in_block>0){
+                block_row[nnz_blocks_count] = j;
+                nnz[nnz_blocks_count] = nnz_in_block;
+                nnz_blocks_count++;
+                nnz_in_col++;
+            }
+        }
+
+        block_col[i+1] = block_col[i] + nnz_in_col;
+    }
+    
+    //readjust the length of the arrays that depend on the number of non-zero blocks
+    nnz = realloc(nnz,nnz_blocks_count * sizeof(uint32_t));
+    if(nnz == NULL){
+        printf("Couldn't reallocate memory for nnz in csc_to_blocked.\n");
+        exit(-1);
+    }
+
+    block_row = realloc(block_row, nnz_blocks_count * sizeof(uint32_t));
+    if(block_row == NULL){
+        printf("Couldn't reallocate memory for block_row in csc_to_blocked.\n");
+        exit(-1);
+    }
+
+    col = realloc(col,nnz_blocks_count *(b + 1)*sizeof(uint32_t));
+    if(col == NULL){
+        printf("Couldn't reallocate memory for col in csc_to_blocked.\n");
+        exit(-1);
+    } 
+
+    block_comp_matrix_2* blocked_matrix = (block_comp_matrix_2*)malloc(sizeof(block_comp_matrix_2));
+    if(blocked_matrix == NULL){
+        printf("Couldn't allocate memory for blocked_matrix in csc_to_blocked.\n");
+        exit(-1);
+    }   
+
+    blocked_matrix->n_b = n_b;
+    blocked_matrix->nnz_blocks = nnz_blocks_count;
+    blocked_matrix->block_col = block_col;
+    blocked_matrix->block_row = block_row;
+
+    nnz_found = 0;
+
+    blocked_matrix->blocks = (comp_matrix**)malloc(nnz_blocks_count*sizeof(comp_matrix*));
+    if(blocked_matrix->blocks == NULL){
+        printf("Couldn't allocate memory for blocks in csc_to_blocked.\n");
+        exit(-1);
+    }
+
+    for(int i=0;i<nnz_blocks_count;++i){
+        blocked_matrix->blocks[i] = (comp_matrix*)malloc(sizeof(comp_matrix));
+        if(blocked_matrix->blocks[i] == NULL){
+            printf("Couldn't allocate memory for blocks[%d] in csc_to_blocked.\n", i);
+            exit(-1);
+        }
+        blocked_matrix->blocks[i]->n = b;
+        blocked_matrix->blocks[i]->nnz = nnz[i];
+        
+        blocked_matrix->blocks[i]->row = (uint32_t*)malloc(nnz[i]*sizeof(uint32_t));
+        if(blocked_matrix->blocks[i]->row == NULL){
+            printf("Couldn't allocate memory for blocks[%d]->row in csc_to_blocked.\n", i);
+            exit(-1);    
+        }
+        for(int j=0;j<nnz[i];++j){
+            blocked_matrix->blocks[i]->row[j] = row[nnz_found+j];
+        }
+        nnz_found += nnz[i];
+
+        blocked_matrix->blocks[i]->col = (uint32_t*)malloc((b+1)*sizeof(uint32_t));
+        if(blocked_matrix->blocks[i]->col == NULL){
+            printf("Couldn't allocate memory for blocks[%d]->col in csc_to_blocked.\n", i);
+            exit(-1);    
+        }
+        for(int j=0;j<b+1;++j){
+            blocked_matrix->blocks[i]->col[j] = col[i*(b+1)+j];
+        }
+    }
+
+    free(col);
+    free(row);
+    free(nnz);
+
+    return blocked_matrix;
+}
+
+
+comp_matrix* blocked_to_csr(block_comp_matrix_2* blocked){
+
+    uint32_t b = blocked->blocks[0]->n;
+    uint32_t n_b = blocked->n_b;
+    uint32_t n = b*n_b;
+    uint32_t blocks_in_row;         //non-zero blocks in a row of blocks   
+    uint32_t nnz_in_row_of_block;   //non-zero elements in a row of elements in a block
+    uint32_t nnz_count = 0;         //non-zero elements found up to this point
+    uint32_t block_row_start;
+    uint32_t row_inside_block_start;
+
+    uint32_t total_nnz = 0;
+    for(uint32_t i=0;i<blocked->nnz_blocks;++i){
+        total_nnz += blocked->blocks[i]->nnz;
+    }
+
+    comp_matrix* csr = (comp_matrix*)malloc(sizeof(comp_matrix));
+    if(csr == NULL){
+        printf("Couldn't allocate memory for csr in blocked_to_csr.\n");
+        exit(-1);
+    }
+
+    csr->n = n;
+    csr->nnz = total_nnz;
+
+    csr->row = (uint32_t*)calloc(n+1,sizeof(uint32_t));
+    if(csr->row == NULL){
+       printf("Couldn't allocate memory for row in blocked_to_csr.\n");
+        exit(-1);
+    } 
+
+    csr->col = (uint32_t*)malloc(total_nnz*sizeof(uint32_t));
+    if(csr->col == NULL){
+       printf("Couldn't allocate memory for col in blocked_to_csr.\n");
+        exit(-1);
+    }
+
+    //For every row of blocks
+    for(uint32_t i=0;i<n_b;++i){
+
+        //Index of first block of this row of blocks
+        block_row_start = blocked->block_row[i];
+
+        //Number of blocks in this row of blocks
+        blocks_in_row = blocked->block_row[i+1]-blocked->block_row[i];
+
+        //If there are no blocks in this row of blocks
+        if(blocks_in_row == 0){
+            for(uint32_t m=0;m<b;++m){
+                //There are no non-zero elements in these rows of elements
+                csr->row[i*b+m+1] = csr->row[i*b+m];
+            }
+            continue;
+        }
+
+        //For every row of elements in a row of blocks
+        for(uint32_t j=0;j<b;++j){
+
+            //For every block in this row of blocks
+            for(uint32_t k=0;k<blocks_in_row;++k){
+
+                //Index of first element in the j-th row of the k-th block in this row of blocks
+                row_inside_block_start = blocked->blocks[block_row_start+k]->row[j];
+
+                //Number of non-zero elements in the j-th row of the k-th block in this row of blocks
+                nnz_in_row_of_block = blocked->blocks[block_row_start+k]->row[j+1]-blocked->blocks[block_row_start+k]->row[j];
+                
+                //If there are no elements in this row of elements of this block
+                if(nnz_in_row_of_block == 0){
+                    continue;
+                }
+                
+                //For every element in this row of elements in this block
+                for(uint32_t l=0;l<nnz_in_row_of_block;++l){
+                    csr->col[nnz_count] = blocked->blocks[block_row_start+k]->col[row_inside_block_start+l];
+                    nnz_count++;
+                }
+
+            }   
+            csr->row[i*b+j+1] = nnz_count;   
+        }
+    }
+    
+    return csr;
+}
+
+
+comp_matrix* blocked_to_csc(block_comp_matrix_2* blocked){
+
+    uint32_t b = blocked->blocks[0]->n;
+    uint32_t n_b = blocked->n_b;
+    uint32_t n = b*n_b;
+    uint32_t blocks_in_col;         //non-zero blocks in a column of blocks   
+    uint32_t nnz_in_col_of_block;   //non-zero elements in a column of elements in a block
+    uint32_t nnz_count = 0;         //non-zero elements found up to this point
+    uint32_t block_col_start;
+    uint32_t col_inside_block_start;
+
+    uint32_t total_nnz = 0;
+    for(uint32_t i=0;i<blocked->nnz_blocks;++i){
+        total_nnz += blocked->blocks[i]->nnz;
+    }
+
+    comp_matrix* csc = (comp_matrix*)malloc(sizeof(comp_matrix));
+    if(csc == NULL){
+        printf("Couldn't allocate memory for csc in blocked_to_csc.\n");
+        exit(-1);
+    }
+
+    csc->n = n;
+    csc->nnz = total_nnz;
+
+    csc->col = (uint32_t*)calloc(n+1,sizeof(uint32_t));
+    if(csc->col == NULL){
+       printf("Couldn't allocate memory for col in blocked_to_csc.\n");
+        exit(-1);
+    } 
+
+    csc->row = (uint32_t*)malloc(total_nnz*sizeof(uint32_t));
+    if(csc->row == NULL){
+       printf("Couldn't allocate memory for row in blocked_to_csc.\n");
+        exit(-1);
+    }
+
+    //For every column of blocks
+    for(uint32_t i=0;i<n_b;++i){
+
+        //Index of first block of this column of blocks
+        block_col_start = blocked->block_col[i];
+
+        //Number of blocks in this column of blocks
+        blocks_in_col = blocked->block_col[i+1]-blocked->block_col[i];
+
+        //If there are no blocks in this column of blocks
+        if(blocks_in_col == 0){
+            //There are no non-zero elements in these columns of elements 
+            for(uint32_t m=0;m<b;++m){
+                csc->col[i*b+m+1] = csc->col[i*b+m];
+            }
+            continue;
+        }
+
+        //For every column of elements in a column of blocks
+        for(uint32_t j=0;j<b;++j){
+
+            //For every block in this column of blocks
+            for(uint32_t k=0;k<blocks_in_col;++k){
+
+                //Index of first element in the j-th column of the k-th block in this column of blocks
+                col_inside_block_start = blocked->blocks[block_col_start+k]->col[j];
+
+                //Number of non-zero elements in the j-th column of the k-th block in this column of blocks
+                nnz_in_col_of_block = blocked->blocks[block_col_start+k]->col[j+1]-blocked->blocks[block_col_start+k]->col[j];
+                
+                //If there are no elements in this column of elements of this block
+                if(nnz_in_col_of_block == 0){
+                    continue;
+                }
+                
+                //For every element in this column of elements in this block
+                for(uint32_t l=0;l<nnz_in_col_of_block;++l){
+                    csc->row[nnz_count] = blocked->blocks[block_col_start+k]->row[col_inside_block_start+l];
+                    nnz_count++;
+                }
+
+            }   
+            csc->col[i*b+j+1] = nnz_count;   
+        }
+    }
+    
+    return csc;
+}
+
+
+void print_blocked_csr(block_comp_matrix_2* blocked_matrix){
+    printf("Printing a blocked csr matrix.\n");
+
+    printf("Block col: ");
+    for(int i=0;i<blocked_matrix->nnz_blocks;++i){
+        printf("%d ",blocked_matrix->block_col[i]);
+    }
+    printf("\n");
+
+    printf("Block row: ");
+    for(int i=0;i<blocked_matrix->n_b+1;++i){
+        printf("%d ",blocked_matrix->block_row[i]);
+    }
+    printf("\n");
+
+    for(int i=0;i<blocked_matrix->nnz_blocks;++i){
+        printf("Block %d:\n",i);
+        print_csr(blocked_matrix->blocks[i]);
+        printf("\n");
+    }
+    printf("\n");
+}
+
+
+void print_blocked_csc(block_comp_matrix_2* blocked_matrix){
+    printf("Printing a blocked csc matrix.\n");
+
+    printf("Block row: ");
+    for(int i=0;i<blocked_matrix->nnz_blocks;++i){
+        printf("%d ",blocked_matrix->block_row[i]);
+    }
+    printf("\n");
+
+    printf("Block col: ");
+    for(int i=0;i<blocked_matrix->n_b+1;++i){
+        printf("%d ",blocked_matrix->block_col[i]);
+    }
+    printf("\n");
+
+    for(int i=0;i<blocked_matrix->nnz_blocks;++i){
+        printf("Block %d:\n",i);
+        print_csc(blocked_matrix->blocks[i]);
+        printf("\n");
+    }
+    printf("\n");
+}
+
+
+void free_blocked_comp_matrix_2(block_comp_matrix_2* blocked_matrix){
+    free(blocked_matrix->block_col);
+    free(blocked_matrix->block_row);
+    
+    for(int i=0;i<blocked_matrix->nnz_blocks;++i){
+        free_comp_matrix(blocked_matrix->blocks[i]);
+    }
+    free(blocked_matrix->blocks);
+
+    free(blocked_matrix);
+}
+
+//TODO an ola leitourgoun kala, na dw an mporw kapws na sumpth3w tis sunarthseis
+//wste na mhn einai 3exwrista gia tous csc kai tous csr
 
 #endif
