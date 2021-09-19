@@ -29,10 +29,18 @@ comp_matrix *bmm_seq(comp_matrix *A, comp_matrix *B) {
 
         C->col[i] = col_indx;
 
+        if (ptr_in_row_B == end_in_row_B){
+            continue;
+        }
+
         // And iterate for every row of A
         for (int j = 0; j < A->n; j++) {
             ptr_in_col_A = A->row[j];
             end_in_col_A = A->row[j + 1];
+
+            if (ptr_in_col_A == end_in_col_A){
+                break;
+            }
 
             while (ptr_in_col_A < end_in_col_A && ptr_in_row_B < end_in_row_B) {
                 if (A->col[ptr_in_col_A] < B->row[ptr_in_row_B]) {

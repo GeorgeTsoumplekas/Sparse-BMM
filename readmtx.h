@@ -1,3 +1,6 @@
+#ifndef READMTX_H
+#define READMTX_H
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -197,3 +200,5 @@ comp_matrix* mtx2comp(char* filename, char* type) {
         exit(-1);
     }
 }
+
+#endif
