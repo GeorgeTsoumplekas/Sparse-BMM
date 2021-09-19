@@ -26,7 +26,7 @@ int main(void) {
     clock_gettime(CLOCK_MONOTONIC, &begin);
 
     // comp_matrix *C = bmm_filtered_seq(A, B, F);
-    comp_matrix *C = bmm_seq(A, B);
+    comp_matrix *C = bmm_seq(A, B, 0);
 
     // End timer
     clock_gettime(CLOCK_MONOTONIC, &end);
