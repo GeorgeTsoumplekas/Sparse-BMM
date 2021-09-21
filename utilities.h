@@ -51,47 +51,11 @@ typedef struct {
     uint32_t n_b;
 } block_comp_matrix_2;
 
-/* ......   Functions   ......*/
-// Functions for the comp_matrix struct
 
-//Create a comp matrix struct
-comp_matrix* new_comp_matrix(uint32_t nnz, uint32_t n, char* type) {
 
-    comp_matrix* array = (comp_matrix*)malloc(sizeof(comp_matrix));
-    if (array == NULL){
-        printf("Couldn't allocate memory for array in new_comp_matrix.\n");
-        exit(-1);
-    } 
+/* -----------------------Functions for the 2d matrices----------------------------*/
 
-    if (!strcmp(type, "csc")) {
-        array->col = (uint32_t*)malloc((n + 1) * sizeof(uint32_t));
-        array->row = (uint32_t*)malloc(nnz * sizeof(uint32_t));
-    } else if (!strcmp(type, "csr")) {
-        array->col = (uint32_t*)malloc(nnz * sizeof(uint32_t));
-        array->row = (uint32_t*)malloc((n + 1) * sizeof(uint32_t));
-    } else {
-        printf("Unknown type in new_comp_matrix function.\n");
-    }
 
-    if (array->col == NULL || array->row == NULL) {
-        printf("Couldn't allocate memory for array->col or array->row in new_comp_matrix.\n");
-        free(array);
-        exit(-1);
-    }
-
-    array->nnz = nnz;
-    array->n = n;
-
-    return array;
-}
-
-void free_comp_matrix(comp_matrix* array) {
-    free(array->col);
-    free(array->row);
-    free(array);
-}
-
-/* Functions for the matrix_2d struct */
 // Creates a random 2d matrix
 matrix_2d* rand_matrix_2d(int rows, int cols) {
     matrix_2d* array = (matrix_2d*)malloc(sizeof(matrix_2d));
@@ -126,15 +90,8 @@ matrix_2d* rand_matrix_2d(int rows, int cols) {
     return array;
 }
 
-void free_matrix_2d(matrix_2d* array) {
-    for (int i = 0; i < array->rows; i++) {
-        free(array->mat[i]);
-    }
-    free(array->mat);
-    free(array);
-}
 
-// Prints an array of type matrix_2d
+//Prints an array of type matrix_2d
 void print_matrix_2d(matrix_2d* array) {
     for (int i = 0; i < array->rows; i++) {
         for (int j = 0; j < array->cols; j++) {
@@ -144,10 +101,61 @@ void print_matrix_2d(matrix_2d* array) {
     }
 }
 
-/* General functions */
+
+//Free memory allocated for a 2d matrix
+void free_matrix_2d(matrix_2d* array) {
+    for (int i = 0; i < array->rows; i++) {
+        free(array->mat[i]);
+    }
+    free(array->mat);
+    free(array);
+}
+
+
+/*------------------------Functions for the CSR/CSC matrices-------------------------------*/
+
+
+//Create a comp matrix struct
+comp_matrix* new_comp_matrix(uint32_t nnz, uint32_t n, char* type) {
+
+    comp_matrix* array = (comp_matrix*)malloc(sizeof(comp_matrix));
+    if (array == NULL){
+        printf("Couldn't allocate memory for array in new_comp_matrix.\n");
+        exit(-1);
+    } 
+
+    //If we want to create a csc matrix
+    if (!strcmp(type, "csc")) {
+        array->col = (uint32_t*)malloc((n + 1) * sizeof(uint32_t));
+        array->row = (uint32_t*)malloc(nnz * sizeof(uint32_t));
+    }
+    //If we want to create a csr matrix
+    else if (!strcmp(type, "csr")) {
+        array->col = (uint32_t*)malloc(nnz * sizeof(uint32_t));
+        array->row = (uint32_t*)malloc((n + 1) * sizeof(uint32_t));
+    }
+    else {
+        printf("Unknown type in new_comp_matrix function.\n");
+    }
+
+    if (array->col == NULL || array->row == NULL) {
+        printf("Couldn't allocate memory for array->col or array->row in new_comp_matrix.\n");
+        free(array);
+        exit(-1);
+    }
+
+    array->nnz = nnz;
+    array->n = n;
+
+    return array;
+}
+
+
 // Function that turns a matrix_2d array to csc format
 comp_matrix* matrix2csc(matrix_2d* array) {
+
     uint32_t nnz = 0;
+
     // Find the number of the non zero elements
     for (int i = 0; i < array->rows; i++) {
         for (int j = 0; j < array->cols; j++) {
@@ -178,9 +186,12 @@ comp_matrix* matrix2csc(matrix_2d* array) {
     return csc;
 }
 
-// Function that turns a matrix_2d array to csr format
+
+//Function that turns a matrix_2d array to csr format
 comp_matrix* matrix2csr(matrix_2d* array) {
+
     uint32_t nnz = 0;
+
     // Find the number of the non zero elements
     for (int i = 0; i < array->rows; i++) {
         for (int j = 0; j < array->cols; j++) {
@@ -211,7 +222,8 @@ comp_matrix* matrix2csr(matrix_2d* array) {
     return csr;
 }
 
-// Prints a csc matrix
+
+//Prints a csc matrix
 void print_csc(comp_matrix* array) {
     printf("Printing a csc matrix.\n");
     for (int i = 0; i < array->n + 1; i++) {
@@ -224,7 +236,8 @@ void print_csc(comp_matrix* array) {
     printf("\n");
 }
 
-// Prints a csr matrix
+
+//Prints a csr matrix
 void print_csr(comp_matrix* array) {
     printf("Printing a csr matrix.\n");
     for (int i = 0; i < array->n + 1; i++) {
@@ -235,6 +248,14 @@ void print_csr(comp_matrix* array) {
         printf("%d ", array->col[i]);
     }
     printf("\n");
+}
+
+
+//Free memory allocated for a csr/csc matrix
+void free_comp_matrix(comp_matrix* array) {
+    free(array->col);
+    free(array->row);
+    free(array);
 }
 
 //an ola pane kala me tous neous blocked auta tha paroun podi
@@ -553,8 +574,15 @@ void free_blocked_comp_matrix(block_comp_matrix* blocked_csr){
 }
 */
 
+/*------------------- Functions for the blocked CSR/CSC matrices ------------------------*/
+
+/**
+ * Function that transforms a csr matrix into a blocked csr matrix.
+ * The basic idea is that we use a csr format to store the blocks
+ *  while each block is also in csr format.
+**/
 block_comp_matrix_2* csr_to_blocked(comp_matrix* array,uint32_t b){
-    //number of blocks in each dimension(both zero and non-zero blocks included)
+    //Number of blocks in each dimension(both zero and non-zero blocks included)
     uint32_t n_b = (array->n)/b;
 
     uint32_t* nnz = (uint32_t*)calloc(pow(n_b,2),sizeof(uint32_t));
@@ -598,21 +626,21 @@ block_comp_matrix_2* csr_to_blocked(comp_matrix* array,uint32_t b){
         for(uint32_t j=0;j<n_b;++j){
             nnz_in_block = 0;
             
-            //for each row included in the block
+            //For each row included in the block
             for(uint32_t k=0;k<b;++k){
-                //for each non-zero element of the row
+                //For each non-zero element of the row
                 for(uint32_t l=array->row[i*b+k];l<array->row[i*b+k+1];++l){
-                    //the non-zero element belongs to a following block in this row of blocks
+                    //The non-zero element belongs to a following block in this row of blocks
                     if(array->col[l]>=(j+1)*b){
                         break;
                     }
-                    //the non-zero element belongs to this block
+                    //The non-zero element belongs to this block
                     else if(array->col[l]>=j*b){
                         nnz_in_block++;
                         col[nnz_found] = array->col[l];
                         nnz_found++;
                     }
-                    //the non-zero element belongs to a previous block in this row of blocks
+                    //The non-zero element belongs to a previous block in this row of blocks
                     else{
                         continue;
                     }
@@ -621,7 +649,7 @@ block_comp_matrix_2* csr_to_blocked(comp_matrix* array,uint32_t b){
                 row[nnz_blocks_count*(b+1)+k+1] = nnz_in_block;
             }
             
-            //we have a non-zero block
+            //We have a non-zero block
             if(nnz_in_block>0){
                 block_col[nnz_blocks_count] = j;
                 nnz[nnz_blocks_count] = nnz_in_block;
@@ -633,7 +661,7 @@ block_comp_matrix_2* csr_to_blocked(comp_matrix* array,uint32_t b){
         block_row[i+1] = block_row[i] + nnz_in_row;
     }
     
-    //readjust the length of the arrays that depend on the number of non-zero blocks
+    //Readjust the length of the arrays that depend on the number of non-zero blocks
     nnz = realloc(nnz,nnz_blocks_count * sizeof(uint32_t));
     if(nnz == NULL){
         printf("Couldn't reallocate memory for nnz in csr_to_blocked.\n");
@@ -663,8 +691,9 @@ block_comp_matrix_2* csr_to_blocked(comp_matrix* array,uint32_t b){
     blocked_matrix->block_col = block_col;
     blocked_matrix->block_row = block_row;
 
-    nnz_found = 0;
+    nnz_found = 0;  //Non-zero elements found up to this point
 
+    //Create the csr format of each non-zero block
     blocked_matrix->blocks = (comp_matrix**)malloc(nnz_blocks_count*sizeof(comp_matrix*));
     if(blocked_matrix->blocks == NULL){
         printf("Couldn't allocate memory for blocks in csr_to_blocked.\n");
@@ -707,8 +736,13 @@ block_comp_matrix_2* csr_to_blocked(comp_matrix* array,uint32_t b){
     return blocked_matrix;
 }
 
+
+/**
+ * Similar to csr_to_blocked but for csc format.
+ * Blocks are stored in csc format while each block is also in csc format.
+**/
 block_comp_matrix_2* csc_to_blocked(comp_matrix* array,uint32_t b){
-    //number of blocks in each dimension(both zero and non-zero blocks included)
+    //Number of blocks in each dimension(both zero and non-zero blocks included)
     uint32_t n_b = (array->n)/b;
 
     uint32_t* nnz = (uint32_t*)calloc(pow(n_b,2),sizeof(uint32_t));
@@ -741,10 +775,10 @@ block_comp_matrix_2* csc_to_blocked(comp_matrix* array,uint32_t b){
         exit(-1);
     }
 
-    uint32_t nnz_in_block;      //number of non-zero elements in each block
-    uint32_t nnz_in_col;        //number of non-zero blocks in each row of blocks  
-    uint32_t nnz_found = 0;     //number of non-zero elements we have found until this point
-    uint32_t nnz_blocks_count = 0; //number of blocks with non-zero elements
+    uint32_t nnz_in_block;          //Number of non-zero elements in each block
+    uint32_t nnz_in_col;            //Number of non-zero blocks in each row of blocks  
+    uint32_t nnz_found = 0;         //Number of non-zero elements found until this point
+    uint32_t nnz_blocks_count = 0;  //Number of blocks with non-zero elements
 
     //First 2 for loops to check all blocks
     for(uint32_t i=0;i<n_b;++i){
@@ -752,21 +786,21 @@ block_comp_matrix_2* csc_to_blocked(comp_matrix* array,uint32_t b){
         for(uint32_t j=0;j<n_b;++j){
             nnz_in_block = 0;
             
-            //for each row included in the block
+            //For each row included in the block
             for(uint32_t k=0;k<b;++k){
-                //for each non-zero element of the column
+                //For each non-zero element of the column
                 for(uint32_t l=array->col[i*b+k];l<array->col[i*b+k+1];++l){
-                    //the non-zero element belongs to a following block in this column of blocks
+                    //The non-zero element belongs to a following block in this column of blocks
                     if(array->row[l]>=(j+1)*b){
                         break;
                     }
-                    //the non-zero element belongs to this block
+                    //The non-zero element belongs to this block
                     else if(array->row[l]>=j*b){
                         nnz_in_block++;
                         row[nnz_found] = array->row[l];
                         nnz_found++;
                     }
-                    //the non-zero element belongs to a previous block in this column of blocks
+                    //The non-zero element belongs to a previous block in this column of blocks
                     else{
                         continue;
                     }
@@ -775,7 +809,7 @@ block_comp_matrix_2* csc_to_blocked(comp_matrix* array,uint32_t b){
                 col[nnz_blocks_count*(b+1)+k+1] = nnz_in_block;
             }
             
-            //we have a non-zero block
+            //We have a non-zero block
             if(nnz_in_block>0){
                 block_row[nnz_blocks_count] = j;
                 nnz[nnz_blocks_count] = nnz_in_block;
@@ -862,18 +896,19 @@ block_comp_matrix_2* csc_to_blocked(comp_matrix* array,uint32_t b){
 }
 
 
+//Function that transforms a matrix in blocked csr format to csr format
 comp_matrix* blocked_to_csr(block_comp_matrix_2* blocked){
 
-    uint32_t b = blocked->blocks[0]->n;
+    uint32_t b = blocked->blocks[0]->n; //We assume that the matrix has at least one non-zero block
     uint32_t n_b = blocked->n_b;
-    uint32_t n = b*n_b;
-    uint32_t blocks_in_row;         //non-zero blocks in a row of blocks   
-    uint32_t nnz_in_row_of_block;   //non-zero elements in a row of elements in a block
-    uint32_t nnz_count = 0;         //non-zero elements found up to this point
-    uint32_t block_row_start;
-    uint32_t row_inside_block_start;
+    uint32_t n = b*n_b;             
+    uint32_t blocks_in_row;         //Non-zero blocks in a row of blocks   
+    uint32_t nnz_in_row_of_block;   //Non-zero elements in a row of elements in a block
+    uint32_t nnz_count = 0;         //Non-zero elements found up to this point
+    uint32_t block_row_start;       //Index of first non-zero block in a row of blocks
+    uint32_t row_inside_block_start; //Index of first non-zero element in a row of a block
 
-    uint32_t total_nnz = 0;
+    uint32_t total_nnz = 0;         //Total non-zero elements
     for(uint32_t i=0;i<blocked->nnz_blocks;++i){
         total_nnz += blocked->blocks[i]->nnz;
     }
@@ -949,14 +984,18 @@ comp_matrix* blocked_to_csr(block_comp_matrix_2* blocked){
 }
 
 
+/**
+ * Function that transforms a matrix in blocked csc format to csc format
+ * Works similarly as the blocked_to_csr function
+**/
 comp_matrix* blocked_to_csc(block_comp_matrix_2* blocked){
 
     uint32_t b = blocked->blocks[0]->n;
     uint32_t n_b = blocked->n_b;
     uint32_t n = b*n_b;
-    uint32_t blocks_in_col;         //non-zero blocks in a column of blocks   
-    uint32_t nnz_in_col_of_block;   //non-zero elements in a column of elements in a block
-    uint32_t nnz_count = 0;         //non-zero elements found up to this point
+    uint32_t blocks_in_col;           
+    uint32_t nnz_in_col_of_block;   
+    uint32_t nnz_count = 0;         
     uint32_t block_col_start;
     uint32_t col_inside_block_start;
 
@@ -1036,6 +1075,11 @@ comp_matrix* blocked_to_csc(block_comp_matrix_2* blocked){
 }
 
 
+/**
+ * Function that prints a blocked csr matrix.
+ * First it prints the csr arrays we have in the block-level
+ * and then prints the csr arrays of each non-zero block
+**/
 void print_blocked_csr(block_comp_matrix_2* blocked_matrix){
     printf("Printing a blocked csr matrix.\n");
 
@@ -1060,6 +1104,11 @@ void print_blocked_csr(block_comp_matrix_2* blocked_matrix){
 }
 
 
+/**
+ * Function that prints a blocked csc matrix.
+ * First it prints the csc arrays we have in the block-level
+ * and then prints the csc arrays of each non-zero block
+**/
 void print_blocked_csc(block_comp_matrix_2* blocked_matrix){
     printf("Printing a blocked csc matrix.\n");
 
@@ -1084,6 +1133,7 @@ void print_blocked_csc(block_comp_matrix_2* blocked_matrix){
 }
 
 
+//Free allocated memory used for a matrix in blocked csr/csc format
 void free_blocked_comp_matrix_2(block_comp_matrix_2* blocked_matrix){
     free(blocked_matrix->block_col);
     free(blocked_matrix->block_row);
