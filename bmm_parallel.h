@@ -12,9 +12,26 @@ typedef struct {
 
 coo *new_coo(uint32_t nnz) {
     coo *mat = (coo *)malloc(sizeof(coo));
+    if (mat == NULL) {
+        printf("Couldn't allocate memory for mat in new_coo.\n");
+        exit(-1);
+    }
     mat->col = (uint32_t *)calloc(nnz, sizeof(uint32_t));
+    if (mat->col == NULL) {
+        printf("Couldn't allocate memory for mat->col in new_coo.\n");
+        free(mat);
+        exit(-1);
+    }
     mat->row = (uint32_t *)calloc(nnz, sizeof(uint32_t));
+    if (mat->row == NULL) {
+        printf("Couldn't allocate memory for mat->row in new_coo.\n");
+        free(mat->col);
+        free(mat);
+        exit(-1);
+    }
     mat->nnz = nnz;
+
+    return mat;
 }
 
 void free_coo(coo *mat) {
@@ -24,7 +41,7 @@ void free_coo(coo *mat) {
 }
 
 void print_coo(coo *array) {
-    printf("Rows: ");
+    printf("\nRows: ");
     for (int i = 0; i < array->nnz; i++) {
         printf("%d ", array->row[i]);
     }
@@ -112,8 +129,8 @@ comp_matrix *bmm_parallel(comp_matrix *A, comp_matrix *B) {
         total_nnz += nnz;
         // If the size of C_reduced isn't enough reallocate memory
         if (total_nnz > C_reduced->nnz) {
-            C_reduced->col = realloc(C_reduced->col, 2 * C_reduced->nnz * sizeof(uint32_t));
-            C_reduced->row = realloc(C_reduced->row, 2 * C_reduced->nnz * sizeof(uint32_t));
+            C_reduced->col = (uint32_t*)realloc(C_reduced->col, 2 * C_reduced->nnz * sizeof(uint32_t));
+            C_reduced->row = (uint32_t*)realloc(C_reduced->row, 2 * C_reduced->nnz * sizeof(uint32_t));
             C_reduced->nnz = 2 * C_reduced->nnz;
         }
 
@@ -135,8 +152,8 @@ comp_matrix *bmm_parallel(comp_matrix *A, comp_matrix *B) {
     free_coo(C_temp);
 
     // Fix values of C_reduced
-    C_reduced->col = realloc(C_reduced->col, total_nnz * sizeof(uint32_t));
-    C_reduced->row = realloc(C_reduced->row, total_nnz * sizeof(uint32_t));
+    C_reduced->col = (uint32_t*)realloc(C_reduced->col, total_nnz * sizeof(uint32_t));
+    C_reduced->row = (uint32_t*)realloc(C_reduced->row, total_nnz * sizeof(uint32_t));
     C_reduced->nnz = total_nnz;
 
     // Transform the coo format of C to csc format
