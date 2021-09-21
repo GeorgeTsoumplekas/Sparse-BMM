@@ -662,19 +662,19 @@ block_comp_matrix_2* csr_to_blocked(comp_matrix* array,uint32_t b){
     }
     
     //Readjust the length of the arrays that depend on the number of non-zero blocks
-    nnz = realloc(nnz,nnz_blocks_count * sizeof(uint32_t));
+    nnz = (uint32_t*)realloc(nnz,nnz_blocks_count * sizeof(uint32_t));
     if(nnz == NULL){
         printf("Couldn't reallocate memory for nnz in csr_to_blocked.\n");
         exit(-1);
     }
 
-    block_col = realloc(block_col, nnz_blocks_count * sizeof(uint32_t));
+    block_col = (uint32_t*)realloc(block_col, nnz_blocks_count * sizeof(uint32_t));
     if(block_col == NULL){
         printf("Couldn't reallocate memory for block_col in csr_to_blocked.\n");
         exit(-1);
     }
 
-    row = realloc(row,nnz_blocks_count *(b + 1)*sizeof(uint32_t));
+    row = (uint32_t*)realloc(row,nnz_blocks_count *(b + 1)*sizeof(uint32_t));
     if(row == NULL){
         printf("Couldn't reallocate memory for row in csr_to_blocked.\n");
         exit(-1);
@@ -822,19 +822,19 @@ block_comp_matrix_2* csc_to_blocked(comp_matrix* array,uint32_t b){
     }
     
     //readjust the length of the arrays that depend on the number of non-zero blocks
-    nnz = realloc(nnz,nnz_blocks_count * sizeof(uint32_t));
+    nnz = (uint32_t*)realloc(nnz,nnz_blocks_count * sizeof(uint32_t));
     if(nnz == NULL){
         printf("Couldn't reallocate memory for nnz in csc_to_blocked.\n");
         exit(-1);
     }
 
-    block_row = realloc(block_row, nnz_blocks_count * sizeof(uint32_t));
+    block_row = (uint32_t*)realloc(block_row, nnz_blocks_count * sizeof(uint32_t));
     if(block_row == NULL){
         printf("Couldn't reallocate memory for block_row in csc_to_blocked.\n");
         exit(-1);
     }
 
-    col = realloc(col,nnz_blocks_count *(b + 1)*sizeof(uint32_t));
+    col = (uint32_t*)realloc(col,nnz_blocks_count *(b + 1)*sizeof(uint32_t));
     if(col == NULL){
         printf("Couldn't reallocate memory for col in csc_to_blocked.\n");
         exit(-1);
