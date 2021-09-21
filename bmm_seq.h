@@ -6,18 +6,22 @@
  * the product of those matrices.
  * Matrix A is in CSR format, whereas matrix B is in CSC format.
  * The function returns the product in CSR format.
+ * We also use here an argument named concept. The reason is that we use this function as a subroutine
+ * in blocked multiplication to multiply blocks so it is necessary to add the blocks' offset
+ * so that the column indexes are correct in regards to the whole matrix and not only the 
+ * block locally.
  **/
 comp_matrix *bmm_seq(comp_matrix *A, comp_matrix *B, uint32_t offset) {
-    // The size of C->col is correct and equal to the columns of B.
-    // However, we don't know the value of nnz.
-    // We assume it at roughly A->nnz + B->nnz.
-    // If this is not enough the array C->row will be reallocated.
+    //The size of C->col is equal to the columns of B.
+    //However, we don't know the value of nnz.
+    //We assume it to be roughly A->nnz + B->nnz.
+    //If this is not enough the array C->row will be reallocated.
     comp_matrix *C = new_comp_matrix(A->nnz + B->nnz, B->n, "csr");
 
-    // Number of non-zero elements in C up to this point
+    //Number of non-zero elements in C up to this point
     uint32_t nnz_count = 0;
 
-    // Pointers used to go through A->col and B->row respectively
+    //Pointers used to go through A->col and B->row respectively
     uint32_t A_row_ptr, A_row_end;
     uint32_t B_col_ptr, B_col_end;
 
@@ -33,23 +37,33 @@ comp_matrix *bmm_seq(comp_matrix *A, comp_matrix *B, uint32_t offset) {
             B_col_ptr = B->col[j];
             B_col_end = B->col[j + 1];
 
+            //While there are still non-zero elements in the corresponding row and column
             while (A_row_ptr < A_row_end && B_col_ptr < B_col_end) {
+                //If A's current element's column index is smaller than B's current element's row index
                 if (A->col[A_row_ptr] < B->row[B_col_ptr]) {
                     A_row_ptr++;
                 }
+                //if A's current element's column index is bigger than B's current element's row index
                 else if (A->col[A_row_ptr] > B->row[B_col_ptr]) {
                     B_col_ptr++;
                 }
+                //If A's current element's column index is matching with B's current element's row index
+                //then we have a non-zero element in C in this position
                 else{
                     C->col[nnz_count] = j + offset;
                     nnz_count++;
-                    // Extend the C->col array if there are not enough empty
-                    // cells
+                    // Extend the C->col array if there are not enough empty cells
                     if (C->nnz == nnz_count) {
                         C->col = realloc(C->col, 2 * C->nnz * sizeof(uint32_t));
+                        if(C->col == NULL){
+                            printf("Couldn't reallocate memory for col in bmm_seq.\n");
+                            exit(-1);
+                        }
                         C->nnz = 2 * C->nnz;
                     }
 
+                    //If we have already found a non-zero element in this position,
+                    //there is no reason to continue calculating for this row of A and column of B.
                     break;
                 }
             }
@@ -59,20 +73,21 @@ comp_matrix *bmm_seq(comp_matrix *A, comp_matrix *B, uint32_t offset) {
         }
     }
 
-    //In case the multiplication gives a matrix with zero elements only
+    //In case the multiplication gives a matrix with zero elements only, retun a NULL matrix
     if(nnz_count == 0){
         free(C->col);
         free(C->row);
+        free(C);
         C = NULL;
         return C;
     }
 
-    // Change to the true number of non zero values
+    //Change to the true number of non zero values
     C->nnz = nnz_count;
 
     C->row[C->n] = nnz_count;
 
-    // Reduce array to correct size
+    //Reduce col index array to correct size
     C->col = (uint32_t *)realloc(C->col, C->nnz * sizeof(uint32_t));
 
     return C;
@@ -143,7 +158,11 @@ comp_matrix *bmm_filtered_seq(comp_matrix *A, comp_matrix *B, comp_matrix *F) {
     return C;
 }
 
-// Test function for small matrices
+/**
+ * Test function for small matrices.
+ * Performs the traditional matrix multiplication where the matrices are stored in the
+ * classic format.
+**/
 matrix_2d *bmm_seq_2d(matrix_2d *A, matrix_2d *B) {
     int rows = A->rows;
     int cols = B->cols;
@@ -180,20 +199,25 @@ matrix_2d *bmm_seq_2d(matrix_2d *A, matrix_2d *B) {
     return c_mat;
 }
 
-
-//ousiastika tha leitourgei san merge-sort se kathe seira
-//oi A kai B einai se csr morfh
+/**
+ * Function that applies element-wise union in two matrices A and B.
+ * Both A and B are in csr format.
+ * This function works as the merge part of a mergesort for each row of the matrix, sorting
+ * elements of corresponding rows in A and B based on their column index. In case of non-zero 
+ * elements with the same row and column indexes this element is only counted once.
+**/
 comp_matrix* block_union(comp_matrix* A, comp_matrix* B){
-    uint32_t nnz_count = 0;
+    uint32_t nnz_count = 0; //number of non-zero elements of C found up to this point
     uint32_t b = B->n;
 
-    uint32_t A_row_end;
-    uint32_t A_row_ptr;
 
-    uint32_t B_row_end;
-    uint32_t B_row_ptr;
+    uint32_t A_row_end;     //index of the last element in a specific row of A
+    uint32_t A_row_ptr;     //used to iterate through the elements of a row in A
 
-    //If A is NULL and B is not NULL
+    uint32_t B_row_end;     //index of the last element in a specific row of B
+    uint32_t B_row_ptr;     //used to iterate through the elements of a row in B
+
+    //If A is NULL and B is not NULL, then returned matrix is same as B
     if(A == NULL){
         A = (comp_matrix*)malloc(sizeof(comp_matrix));
         if(A==NULL){
@@ -221,6 +245,8 @@ comp_matrix* block_union(comp_matrix* A, comp_matrix* B){
         return A;
     }
 
+    //Number of non-zero elements in returned matrix is less or equal than the sum
+    //of non-zero elements in A and B.
     uint32_t* new_col = (uint32_t*)malloc((A->nnz+B->nnz)*sizeof(uint32_t));
     if(new_col == NULL){
         printf("Couldn't allocate memory for new_col in block_union_csr.\n");
@@ -247,15 +273,19 @@ comp_matrix* block_union(comp_matrix* A, comp_matrix* B){
             continue;
         }
 
+        //While there are still non-zero elements in both rows
         while(A_row_ptr<A_row_end && B_row_ptr<B_row_end){
+            //If A's current element's column idex is smaller than that of B's current element's
             if(A->col[A_row_ptr] < B->col[B_row_ptr]){
                 new_col[nnz_count] = A->col[A_row_ptr];
                 A_row_ptr++;
             }
+            //If B's current element's column idex is smaller than that of A's current element's
             else if(B->col[B_row_ptr] < A->col[A_row_ptr]){
                 new_col[nnz_count] = B->col[B_row_ptr];
                 B_row_ptr++;
             }
+            //If the column index of the two elements is the same
             else{
                 new_col[nnz_count] = A->col[A_row_ptr];
                 A_row_ptr++;
@@ -264,12 +294,14 @@ comp_matrix* block_union(comp_matrix* A, comp_matrix* B){
             nnz_count++;
         }
 
+        //If there are non-zero elements left only in the row of A just add them in the same order they appear
         while(A_row_ptr < A_row_end){
             new_col[nnz_count] = A->col[A_row_ptr];
             A_row_ptr++;
             nnz_count++;
         }
 
+        //Same if there are non-zero elements left only in the row of B
         while(B_row_ptr < B_row_end){
             new_col[nnz_count] = B->col[B_row_ptr];
             B_row_ptr++;
@@ -279,6 +311,7 @@ comp_matrix* block_union(comp_matrix* A, comp_matrix* B){
         new_row[i+1] = nnz_count;
     }
 
+    //Reallocate column index array of the returned matrix to the correct size
     if(nnz_count < (A->nnz+B->nnz)){
         new_col = (uint32_t*)realloc(new_col,nnz_count*sizeof(uint32_t));
         if(new_col == NULL){
@@ -300,8 +333,11 @@ comp_matrix* block_union(comp_matrix* A, comp_matrix* B){
 
 /**
  * Function that mulitplies two matrices A and B.
- * A is in blocked csr format and B is in blocked csc format
+ * A is in blocked csr format and B is in blocked csc format.
  * Matrix C = A*B is in csr blocked format.
+ * This function works as the simple bmm function but instead of non-zero elements
+ * we use non-zero blocks. Then if we have a match we multiply those blocks using
+ * the simple bmm function.
 **/
 block_comp_matrix_2* blocked_bmm_seq(block_comp_matrix_2* A, block_comp_matrix_2* B){
 
@@ -351,7 +387,7 @@ block_comp_matrix_2* blocked_bmm_seq(block_comp_matrix_2* A, block_comp_matrix_2
     uint32_t block_row_ptr;     //Iterator through the non-zero blocks of a row of blocks
     uint32_t block_col_ptr;     //Iterator through the non-zero blocks of a column of blocks
 
-    uint32_t nnz_blocks_found = 0;  //number of C's non-zero blocks found up to this point
+    uint32_t nnz_blocks_found = 0;  //Number of C's non-zero blocks found up to this point
 
     uint32_t first_match;       //Used as a flag to see whether it is the first time we have matching blocks to apply multiplication to
 
@@ -362,6 +398,8 @@ block_comp_matrix_2* blocked_bmm_seq(block_comp_matrix_2* A, block_comp_matrix_2
         block_row_start = A->block_row[i];
         block_row_end = A->block_row[i+1];
 
+        //If there aren't any non-zero blocks in this row of blocks in A
+        //then there aren't any non-zero blocks in this row of blocks in C either
         if(block_row_start == block_row_end){
             C->block_row[i+1] = C->block_row[i];
             continue;
@@ -372,6 +410,7 @@ block_comp_matrix_2* blocked_bmm_seq(block_comp_matrix_2* A, block_comp_matrix_2
             block_col_start = B->block_col[j];
             block_col_end = B->block_col[j+1];
             
+            //If there aren't any non-zero blocks in this column go to the next one
             if(block_col_start == block_col_end){
                 continue;
             }
@@ -413,9 +452,10 @@ block_comp_matrix_2* blocked_bmm_seq(block_comp_matrix_2* A, block_comp_matrix_2
 
                     }
 
+                    //No reason to apply union if the product is NULL
                     if(prod != NULL){
                         C->blocks[nnz_blocks_found-1] = block_union(C->blocks[nnz_blocks_found-1],prod);
-                        free(prod); 
+                        free_comp_matrix(prod); 
                         prod = NULL;
                     }
 
@@ -430,6 +470,7 @@ block_comp_matrix_2* blocked_bmm_seq(block_comp_matrix_2* A, block_comp_matrix_2
 
     C->nnz_blocks = nnz_blocks_found;
 
+    //Resize the arrays whose size is proportional to the number of non-zero blocks in C
     C->block_col = (uint32_t*)realloc(C->block_col,nnz_blocks_found*sizeof(uint32_t));
     if(C->block_col == NULL){
         printf("Couldn't reallocate memory for block_col in blocked_bmm_seq.\n");
@@ -445,5 +486,5 @@ block_comp_matrix_2* blocked_bmm_seq(block_comp_matrix_2* A, block_comp_matrix_2
     return C;
 }
 
-    //TODO: elegxos orthotitas molis oloklhrwthei h blocked_bmm_seq
+    //TODO: elegxos orthotitas molis oloklhrwthei h blocked_bmm_seq se megalous pinakes
     //TODO: blocked_bmm_seq_filtered
