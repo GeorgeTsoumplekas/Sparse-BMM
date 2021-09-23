@@ -49,6 +49,7 @@ typedef struct {
     uint32_t* block_col;
     uint32_t nnz_blocks;
     uint32_t n_b;
+    uint32_t real_dim;
 } block_comp_matrix_2;
 
 
@@ -585,6 +586,26 @@ block_comp_matrix_2* csr_to_blocked(comp_matrix* array,uint32_t b){
     //Number of blocks in each dimension(both zero and non-zero blocks included)
     uint32_t n_b = (array->n)/b;
 
+    uint32_t remaining_rows = (array->n)%b;
+
+    // If n_b is not an integer one more row of blocks should be added
+    if (remaining_rows != 0){
+        n_b = n_b + 1;
+
+        // Temporarily change the array->row variable
+        // Basically we pad the array with zeros to fit the dimensions of the blocks
+        array->row = (uint32_t*)realloc(array->row, (n_b*b + 1)*sizeof(uint32_t));
+        if (array->row == NULL) {
+            printf("Couldn't reallocate memory for array->row in csr_to_blocked.\n");
+            free_comp_matrix(array);
+            exit(-1);
+        }
+        
+        for (int i = array->n + 1; i < n_b*b + 1; i++){
+            array->row[i] = array->nnz;
+        }
+    }
+
     uint32_t* nnz = (uint32_t*)calloc(pow(n_b,2),sizeof(uint32_t));
     if (nnz == NULL){
         printf("Couldn't allocate memory for nnz in csr_to_blocked.\n");
@@ -660,7 +681,7 @@ block_comp_matrix_2* csr_to_blocked(comp_matrix* array,uint32_t b){
 
         block_row[i+1] = block_row[i] + nnz_in_row;
     }
-    
+
     //Readjust the length of the arrays that depend on the number of non-zero blocks
     nnz = (uint32_t*)realloc(nnz,nnz_blocks_count * sizeof(uint32_t));
     if(nnz == NULL){
@@ -690,6 +711,7 @@ block_comp_matrix_2* csr_to_blocked(comp_matrix* array,uint32_t b){
     blocked_matrix->nnz_blocks = nnz_blocks_count;
     blocked_matrix->block_col = block_col;
     blocked_matrix->block_row = block_row;
+    blocked_matrix->real_dim = array->n;
 
     nnz_found = 0;  //Non-zero elements found up to this point
 
@@ -729,6 +751,16 @@ block_comp_matrix_2* csr_to_blocked(comp_matrix* array,uint32_t b){
         }
     }
 
+    // Return array->row array to its original size
+    if (remaining_rows != 0){
+        array->row = (uint32_t*)realloc(array->row, (array->n + 1)*sizeof(uint32_t));
+        if (array->row == NULL) {
+            printf("Couldn't reallocate memory for array->row in csr_to_blocked.\n");
+            free_comp_matrix(array);
+            exit(-1);
+        }
+    }
+
     free(row);
     free(col);
     free(nnz);
@@ -744,6 +776,23 @@ block_comp_matrix_2* csr_to_blocked(comp_matrix* array,uint32_t b){
 block_comp_matrix_2* csc_to_blocked(comp_matrix* array,uint32_t b){
     //Number of blocks in each dimension(both zero and non-zero blocks included)
     uint32_t n_b = (array->n)/b;
+    uint32_t remaining_cols = (array->n) % b;
+
+    // If n_b is not an integer one more row of blocks should be added
+    if (remaining_cols != 0) {
+        n_b = n_b + 1;
+        // Temporarily change the array->col variable
+        // Basically we pad the array with zeros to fit the dimensions of the blocks
+        array->col = (uint32_t*)realloc(array->col, (n_b * b + 1) * sizeof(uint32_t));
+        if (array->col == NULL) {
+            printf("Couldn't reallocate memory for array->col in csc_to_blocked.\n");
+            free_comp_matrix(array);
+            exit(-1);
+        }
+        for (int i = array->n + 1; i < (n_b * b + 1); i++) {
+            array->col[i] = array->nnz;
+        }
+    }
 
     uint32_t* nnz = (uint32_t*)calloc(pow(n_b,2),sizeof(uint32_t));
     if (nnz == NULL){
@@ -850,6 +899,7 @@ block_comp_matrix_2* csc_to_blocked(comp_matrix* array,uint32_t b){
     blocked_matrix->nnz_blocks = nnz_blocks_count;
     blocked_matrix->block_col = block_col;
     blocked_matrix->block_row = block_row;
+    blocked_matrix->real_dim = array->n;
 
     nnz_found = 0;
 
@@ -888,6 +938,16 @@ block_comp_matrix_2* csc_to_blocked(comp_matrix* array,uint32_t b){
         }
     }
 
+    // Return array->col array to its original size
+    if (remaining_cols != 0) {
+        array->col = (uint32_t*)realloc(array->col, (array->n + 1) * sizeof(uint32_t));
+        if (array->col == NULL) {
+            printf("Couldn't reallocate memory for array->col in csc_to_blocked.\n");
+            free_comp_matrix(array);
+            exit(-1);
+        }
+    }
+
     free(col);
     free(row);
     free(nnz);
@@ -919,7 +979,7 @@ comp_matrix* blocked_to_csr(block_comp_matrix_2* blocked){
         exit(-1);
     }
 
-    csr->n = n;
+    csr->n = blocked->real_dim;
     csr->nnz = total_nnz;
 
     csr->row = (uint32_t*)calloc(n+1,sizeof(uint32_t));
@@ -979,6 +1039,16 @@ comp_matrix* blocked_to_csr(block_comp_matrix_2* blocked){
             csr->row[i*b+j+1] = nnz_count;   
         }
     }
+
+    // If the original dimensions mismatch reallocate csr->row to its real size
+    if(blocked->real_dim != n){
+        csr->row = (uint32_t*)realloc(csr->row, (csr->n + 1)*sizeof(uint32_t));
+        if (csr->row == NULL) {
+            printf("Couldn't reallocate memory for csr->row in blocked_to_csr.\n");
+            free_comp_matrix(csr);
+            exit(-1);
+        }
+    }
     
     return csr;
 }
@@ -1010,7 +1080,7 @@ comp_matrix* blocked_to_csc(block_comp_matrix_2* blocked){
         exit(-1);
     }
 
-    csc->n = n;
+    csc->n = blocked->real_dim;
     csc->nnz = total_nnz;
 
     csc->col = (uint32_t*)calloc(n+1,sizeof(uint32_t));
@@ -1070,37 +1140,46 @@ comp_matrix* blocked_to_csc(block_comp_matrix_2* blocked){
             csc->col[i*b+j+1] = nnz_count;   
         }
     }
+
+    // If the original dimensions mismatch reallocate csc->col to its real size
+    if (blocked->real_dim != n) {
+        csc->col = (uint32_t*)realloc(csc->col, (csc->n + 1) * sizeof(uint32_t));
+        if (csc->col == NULL) {
+            printf("Couldn't reallocate memory for csc->col in blocked_to_csc.\n");
+            free_comp_matrix(csc);
+            exit(-1);
+        }
+    }
     
     return csc;
 }
 
+    /**
+     * Function that prints a blocked csr matrix.
+     * First it prints the csr arrays we have in the block-level
+     * and then prints the csr arrays of each non-zero block
+     **/
+    void print_blocked_csr(block_comp_matrix_2 * blocked_matrix) {
+        printf("Printing a blocked csr matrix.\n");
 
-/**
- * Function that prints a blocked csr matrix.
- * First it prints the csr arrays we have in the block-level
- * and then prints the csr arrays of each non-zero block
-**/
-void print_blocked_csr(block_comp_matrix_2* blocked_matrix){
-    printf("Printing a blocked csr matrix.\n");
-
-    printf("Block col: ");
-    for(int i=0;i<blocked_matrix->nnz_blocks;++i){
-        printf("%d ",blocked_matrix->block_col[i]);
-    }
-    printf("\n");
-
-    printf("Block row: ");
-    for(int i=0;i<blocked_matrix->n_b+1;++i){
-        printf("%d ",blocked_matrix->block_row[i]);
-    }
-    printf("\n");
-
-    for(int i=0;i<blocked_matrix->nnz_blocks;++i){
-        printf("Block %d:\n",i);
-        print_csr(blocked_matrix->blocks[i]);
+        printf("Block col: ");
+        for (int i = 0; i < blocked_matrix->nnz_blocks; ++i) {
+            printf("%d ", blocked_matrix->block_col[i]);
+        }
         printf("\n");
-    }
-    printf("\n");
+
+        printf("Block row: ");
+        for (int i = 0; i < blocked_matrix->n_b + 1; ++i) {
+            printf("%d ", blocked_matrix->block_row[i]);
+        }
+        printf("\n");
+
+        for (int i = 0; i < blocked_matrix->nnz_blocks; ++i) {
+            printf("Block %d:\n", i);
+            print_csr(blocked_matrix->blocks[i]);
+            printf("\n");
+        }
+        printf("\n");
 }
 
 
