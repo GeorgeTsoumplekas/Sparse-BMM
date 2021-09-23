@@ -29,6 +29,13 @@ typedef struct {
     uint32_t cols;
 } matrix_2d;
 
+typedef struct {
+    uint32_t* row;
+    uint32_t* col;
+    uint32_t nnz;
+    uint32_t n;
+} coo_matrix;
+
 
 //an olapane kala auto tha parei podi
 typedef struct {
@@ -110,6 +117,74 @@ void free_matrix_2d(matrix_2d* array) {
     }
     free(array->mat);
     free(array);
+}
+
+
+/*------------------------Functions for COO matrices--------------------------------*/
+
+
+/**
+ * Reads a .txt file which contains a sparse square matrix in COO format
+ * and creates a coo matrix struct
+**/
+coo_matrix* readCOO(char* filename){
+    uint32_t n;
+    uint32_t nnz;
+
+    coo_matrix* coo = (coo_matrix*)malloc(sizeof(coo_matrix));
+    if(coo == NULL){
+        printf("Couldn't allocate memory for coo in readCOO.\n");
+        exit(-1);
+    }
+
+    FILE *stream = fopen(filename,"r");
+    if(stream == NULL){
+        printf("Error opening %s\n",filename);
+        exit(-1);
+    }
+
+    //First line of the file contains the size of the square matrix and its number of non-zero elements
+    fscanf(stream,"%u,%u\n",&n,&nnz);
+
+    coo->row = (uint32_t*)malloc(nnz*sizeof(uint32_t));
+    if(coo->row == NULL){
+        printf("Couldn't allocate memory for coo->row in readCOO.\n");
+        exit(-1);
+    }
+
+    coo->col = (uint32_t*)malloc(nnz*sizeof(uint32_t));
+    if(coo->col == NULL){
+        printf("Couldn't allocate memory for coo->col in readCOO.\n");
+        exit(-1);
+    }
+
+    for(uint32_t i=0;i<nnz;++i){
+        fscanf(stream,"%u,%u\n",&coo->row[i],&coo->col[i]);
+    }
+
+    coo->n = n;
+    coo->nnz = nnz;
+
+    fclose(stream);
+
+    return coo;
+}
+
+
+//Prints a COO matrix
+void print_coo(coo_matrix* coo){
+    printf("Printing a COO matrix.\n");
+    for(uint32_t i=0;i<coo->nnz;++i){
+        printf("(%u, %u)\n",coo->row[i],coo->col[i]);
+    }
+}
+
+
+//Frees memory allocated for a COO matrix
+void free_coo(coo_matrix* coo){
+    free(coo->col);
+    free(coo->row);
+    free(coo);
 }
 
 
@@ -221,6 +296,148 @@ comp_matrix* matrix2csr(matrix_2d* array) {
     }
 
     return csr;
+}
+
+
+/**
+ * Function that turns a matrix from coo to csr format
+ * Note for this function to be correct, the non-zero elements should be sorted first by row
+ * and then by column
+**/
+comp_matrix* coo2csr(coo_matrix* coo){
+    comp_matrix* csr = (comp_matrix*)malloc(sizeof(comp_matrix));
+    if(csr == NULL){
+        printf("Couldn't allocate memory for csr in coo2csr./n");
+        exit(-1);
+    }
+
+    csr->n = coo->n;
+    csr->nnz = coo->nnz;
+
+    csr->col = (uint32_t*)malloc(csr->nnz*sizeof(uint32_t));
+    if(csr->col == NULL){
+        printf("Couldn't allocate memory for csr->col in coo2csr./n");
+        exit(-1);
+    }
+
+    csr->row = (uint32_t*)calloc(csr->n+1,sizeof(uint32_t));
+    if(csr->row == NULL){
+        printf("Couldn't allocate memory for csr->row in coo2csr./n");
+        exit(-1);
+    }
+
+    uint32_t prev_elem_row = 0;     //Row in which the previous non-zero element belongs to
+    uint32_t row_count = 1;         //Index of current row
+
+    //For each non-zero element
+    for(uint32_t i=0;i<csr->nnz;++i){
+        csr->col[i] = coo->col[i]-1; //Because csr matrices are 0-based
+
+        //If current element is the first element of a new row
+        if(coo->row[i]-1 > prev_elem_row){
+            //Checking if one or more consecutive rows have zero elements only
+            if(coo->row[i]-1-prev_elem_row > 1){
+                //Then the row index of these rows is the same as the last one's with a non-zero element
+                for(uint32_t j=0;j<(coo->row[i]-1-prev_elem_row);++j){
+                    csr->row[row_count] = i;
+                    row_count++;
+                }
+            }
+            //If there are no zero elements only rows in between
+            else{
+                csr->row[row_count] = i;
+                row_count++;
+            }
+
+            csr->row[row_count] = i+1;
+        }
+        //If current non-zero element belongs to the same row as its previous one
+        else{
+            csr->row[row_count] = i+1;
+        }
+
+
+        prev_elem_row = coo->row[i]-1;
+    }
+
+    //If there are rows with zero elements only after the last non-zero element
+    while(row_count<coo->n+1){
+        csr->row[row_count] = coo->nnz;
+        row_count++;
+    }
+
+    return csr;
+}
+
+
+/**
+ * Function that turns a matrix from coo to csc format
+ * Note for this function to be correct, the non-zero elements should be sorted first by column
+ * and then by row
+**/
+comp_matrix* coo2csc(coo_matrix* coo){
+    comp_matrix* csc = (comp_matrix*)malloc(sizeof(comp_matrix));
+    if(csc == NULL){
+        printf("Couldn't allocate memory for csc in coo2csc./n");
+        exit(-1);
+    }
+
+    csc->n = coo->n;
+    csc->nnz = coo->nnz;
+
+    csc->row = (uint32_t*)malloc(csc->nnz*sizeof(uint32_t));
+    if(csc->row == NULL){
+        printf("Couldn't allocate memory for csc->row in coo2csc./n");
+        exit(-1);
+    }
+
+    csc->col = (uint32_t*)calloc(csc->n+1,sizeof(uint32_t));
+    if(csc->col == NULL){
+        printf("Couldn't allocate memory for csc->col in coo2csc./n");
+        exit(-1);
+    }
+
+    uint32_t prev_elem_col = 0;     //Column in which the previous non-zero element belongs
+    uint32_t col_count = 1;         //Index of current column
+
+    //For each non-zero element
+    for(uint32_t i=0;i<csc->nnz;++i){
+        csc->row[i] = coo->row[i]-1; //Because csc matrices are 0-based
+
+        //If current element is the first element of a new column
+        if(coo->col[i]-1 > prev_elem_col){
+            //Checking if one or more consecutive columns have zero elements only
+            if(coo->col[i]-1-prev_elem_col > 1){
+                //Then the col index of these columns is the same as the last one's with a non-zero element
+                for(uint32_t j=0;j<(coo->col[i]-1-prev_elem_col);++j){
+                    csc->col[col_count] = i;
+                    col_count++;
+                }
+            }
+            //If there are no zero elements only columns in between
+            else{
+                csc->col[col_count] = i;
+                col_count++;
+            }
+
+            csc->col[col_count] = i+1;
+        }
+        //If current non-zero element belongs to the same column as its previous one
+        else{
+            csc->col[col_count] = i+1;
+        }
+
+
+        prev_elem_col = coo->col[i]-1;
+    }
+
+    //If there are rows with zero elements only after the last non-zero element
+    while(col_count<coo->n+1){
+        csc->col[col_count] = coo->nnz;
+        col_count++;
+    }
+
+    return csc;
 }
 
 
@@ -1223,6 +1440,51 @@ void free_blocked_comp_matrix_2(block_comp_matrix_2* blocked_matrix){
     free(blocked_matrix->blocks);
 
     free(blocked_matrix);
+}
+
+
+/*------------------------ Other functions ------------------------------*/
+
+
+/**
+ * Function that checks if the result created by the multiplication of the two matrices is correct.
+ * This is done by transforming the true result in CSR format and comparing it with the one that
+ * we have calculated.
+ * Returns 1 if result is correct, else 0.
+**/
+uint32_t check_result(char* filename_C,comp_matrix* C){
+    
+    //Transform real matrix C in COO format
+    coo_matrix* C_coo_real = readCOO(filename_C);
+
+    //Transform real matrix C from COO to CSR format
+    comp_matrix* C_csr_real = coo2csr(C_coo_real);
+
+    //Compare the two structs element by element
+    if(C->nnz != C_csr_real->nnz){
+        return 0;
+    }
+
+    if(C->n != C_csr_real->n){
+        return 0;
+    }
+
+    for(uint32_t i=0;i<C->nnz;++i){
+        if(C->col[i] != C_csr_real->col[i]){
+            return 0;
+        }
+    }
+
+    for(uint32_t i=0;i<C->n+1;++i){
+        if(C->row[i] != C_csr_real->row[i]){
+            return 0;
+        }
+    }
+
+    free_coo(C_coo_real);
+    free_comp_matrix(C_csr_real);
+
+    return 1;
 }
 
 //TODO an ola leitourgoun kala, na dw an mporw kapws na sumpth3w tis sunarthseis

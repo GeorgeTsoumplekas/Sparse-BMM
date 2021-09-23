@@ -21,7 +21,7 @@ int cmpfunc(const void* a, const void* b) { return (*(int*)a - *(int*)b); }
  *  to be square.
  *
  */
-void coo2csc(comp_matrix* csc, uint32_t* row_coo, uint32_t* col_coo) {
+void coo2csc(comp_matrix* csc, coo_matrix* coo) {
     // ----- cannot assume that input is already 0!
     for (uint32_t l = 0; l < csc->n + 1; l++) {
         csc->col[l] = 0;
@@ -29,7 +29,7 @@ void coo2csc(comp_matrix* csc, uint32_t* row_coo, uint32_t* col_coo) {
 
     // ----- find the correct column sizes
     for (uint32_t l = 0; l < csc->nnz; l++) {
-        csc->col[col_coo[l]]++;
+        csc->col[coo->col[l]]++;
     }
 
     // ----- cumulative sum
@@ -43,10 +43,10 @@ void coo2csc(comp_matrix* csc, uint32_t* row_coo, uint32_t* col_coo) {
     // ----- copy the row indices to the correct place
     for (uint32_t l = 0; l < csc->nnz; l++) {
         uint32_t col_l;
-        col_l = col_coo[l];
+        col_l = coo->col[l];
 
         uint32_t dst = csc->col[col_l];
-        csc->row[dst] = row_coo[l];
+        csc->row[dst] = coo->row[l];
 
         csc->col[col_l]++;
     }
@@ -73,7 +73,7 @@ void coo2csc(comp_matrix* csc, uint32_t* row_coo, uint32_t* col_coo) {
  *  to be square.
  *
  */
-void coo2csr(comp_matrix* csr, uint32_t* row_coo, uint32_t* col_coo) {
+void coo2csr(comp_matrix* csr, coo_matrix* coo) {
     // ----- cannot assume that input is already 0!
     for (uint32_t l = 0; l < csr->n + 1; l++) {
         csr->row[l] = 0;
@@ -81,7 +81,7 @@ void coo2csr(comp_matrix* csr, uint32_t* row_coo, uint32_t* col_coo) {
 
     // ----- find the correct row sizes
     for (uint32_t l = 0; l < csr->nnz; l++) {
-        csr->row[row_coo[l]]++;
+        csr->row[coo->row[l]]++;
     }
 
     // ----- cumulative sum
@@ -95,10 +95,10 @@ void coo2csr(comp_matrix* csr, uint32_t* row_coo, uint32_t* col_coo) {
     // ----- copy the column indices to the correct place
     for (uint32_t l = 0; l < csr->nnz; l++) {
         uint32_t row_l;
-        row_l = row_coo[l];
+        row_l = coo->row[l];
 
         uint32_t dst = csr->row[row_l];
-        csr->col[dst] = col_coo[l];
+        csr->col[dst] = coo->col[l];
 
         csr->row[row_l]++;
     }
@@ -125,7 +125,8 @@ comp_matrix* mtx2comp(char* filename, char* type) {
     MM_typecode matcode;
     FILE* f;
     int M, N, nz;
-    int i, *coo_row, *coo_col;
+    int i;
+    uint32_t *coo_row, *coo_col;
     double* val;
 
     if ((f = fopen(filename, "r")) == NULL) {
@@ -153,8 +154,8 @@ comp_matrix* mtx2comp(char* filename, char* type) {
 
     /* reserve memory for matrices */
     // We assume the matrices are symmetrical and allocate double the size
-    coo_row = (int*)malloc(2 * nz * sizeof(int));
-    coo_col = (int*)malloc(2 * nz * sizeof(int));
+    coo_row = (uint32_t*)malloc(2 * nz * sizeof(uint32_t));
+    coo_col = (uint32_t*)malloc(2 * nz * sizeof(uint32_t));
 
     if (coo_row == NULL){
         printf("Couldn't allocate memory for coo_row in mtx2comp.\n");
@@ -181,22 +182,27 @@ comp_matrix* mtx2comp(char* filename, char* type) {
         fclose(f);
     }
 
+    coo_matrix* coo = (coo_matrix*)malloc(sizeof(coo_matrix));
+    if(coo == NULL){
+        printf("Couldn't allocate memory for coo in mtx2comp.\n");
+        exit(-1);
+    }
+
+    coo->col = coo_col;
+    coo->row = coo_row;
+
     if (!strcmp(type, "csc")) {
-        comp_matrix* csc = new_comp_matrix(2 * nz, N, "csc");
-        coo2csc(csc, (uint32_t*)coo_row, (uint32_t*)coo_col);
-        free(coo_row);
-        free(coo_col);
+        comp_matrix* csc = coo2csc(coo);
+        free_coo(coo);
         return csc;
-    } else if (!strcmp(type, "csr")) {
-        comp_matrix* csr = new_comp_matrix(2 * nz, M, "csr");
-        coo2csr(csr, (uint32_t*)coo_row, (uint32_t*)coo_col);
-        free(coo_row);
-        free(coo_col);
+    else if (!strcmp(type, "csr")) {
+        comp_matrix* csr = coo2csr(coo);
+        free_coo(coo);
         return csr;
-    } else {
+    }
+    else {
         printf("Unknown type in function mtx2comp.\n");
-        free(coo_row);
-        free(coo_col);
+        free_coo(coo)
         exit(-1);
     }
 }
