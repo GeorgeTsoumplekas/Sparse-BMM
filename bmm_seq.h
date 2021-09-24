@@ -381,6 +381,7 @@ block_comp_matrix* blocked_bmm_seq(block_comp_matrix* A, block_comp_matrix* B){
     }
 
     C->n_b = n_b;
+    C->real_dim = A->real_dim;
 
     uint32_t block_row_start;   //First non-zero block in this row of blocks
     uint32_t block_row_end;     //Last non-zero block in this row of blocks
