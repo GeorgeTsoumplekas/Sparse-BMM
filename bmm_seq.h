@@ -1,6 +1,7 @@
 #include "utilities.h"
 #include <string.h>
 
+
 /**
  * Function that takes two matrices A and B in compressed format and produces
  * the product of those matrices.
@@ -93,6 +94,7 @@ comp_matrix *bmm_seq(comp_matrix *A, comp_matrix *B, uint32_t offset) {
     return C;
 }
 
+
 /**
  * Function that takes two matrices A and B in compressed format and produces
  * the filtered product of those matrices according to a third matrix F.
@@ -158,6 +160,7 @@ comp_matrix *bmm_filtered_seq(comp_matrix *A, comp_matrix *B, comp_matrix *F) {
     return C;
 }
 
+
 /**
  * Test function for small matrices.
  * Performs the traditional matrix multiplication where the matrices are stored in the
@@ -198,6 +201,7 @@ matrix_2d *bmm_seq_2d(matrix_2d *A, matrix_2d *B) {
 
     return c_mat;
 }
+
 
 /**
  * Function that applies element-wise union in two matrices A and B.
@@ -339,7 +343,7 @@ comp_matrix* block_union(comp_matrix* A, comp_matrix* B){
  * we use non-zero blocks. Then if we have a match we multiply those blocks using
  * the simple bmm function.
 **/
-block_comp_matrix_2* blocked_bmm_seq(block_comp_matrix_2* A, block_comp_matrix_2* B){
+block_comp_matrix* blocked_bmm_seq(block_comp_matrix* A, block_comp_matrix* B){
 
     //Check if the corresponding dimensions are correct
     if(A->n_b != B->n_b){
@@ -352,7 +356,7 @@ block_comp_matrix_2* blocked_bmm_seq(block_comp_matrix_2* A, block_comp_matrix_2
     //We assume A is a non-zero matrix
     uint32_t b = A->blocks[0]->n;
 
-    block_comp_matrix_2* C = (block_comp_matrix_2*)malloc(sizeof(block_comp_matrix_2));
+    block_comp_matrix* C = (block_comp_matrix*)malloc(sizeof(block_comp_matrix));
     if(C==NULL){
         printf("Couldn't allocate memory for C in blocked_bmm_seq.\n");
         exit(-1);
@@ -485,6 +489,4 @@ block_comp_matrix_2* blocked_bmm_seq(block_comp_matrix_2* A, block_comp_matrix_2
 
     return C;
 }
-
-    //TODO: elegxos orthotitas molis oloklhrwthei h blocked_bmm_seq se megalous pinakes
     //TODO: blocked_bmm_seq_filtered
