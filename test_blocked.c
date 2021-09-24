@@ -7,7 +7,7 @@ void main(int argc, char* argv[]){
         exit(-1);
     }
 
-    uint32_t b = 10000;
+    uint32_t b = 2000;
 
     struct timespec begin, end;
     long seconds;
@@ -84,7 +84,7 @@ void main(int argc, char* argv[]){
     printf("\nTime elapsed for B COO->CSC: %.5f seconds.\n", elapsed);
 
     clock_gettime(CLOCK_MONOTONIC, &begin);
-    block_comp_matrix_2* A_blocked = csr_to_blocked(A_csr,b);
+    block_comp_matrix* A_blocked = csr2blocked(A_csr,b);
 
     // End timer
     clock_gettime(CLOCK_MONOTONIC, &end);
@@ -96,7 +96,7 @@ void main(int argc, char* argv[]){
 
 
     clock_gettime(CLOCK_MONOTONIC, &begin);
-    block_comp_matrix_2* B_blocked = csc_to_blocked(B_csc,b);
+    block_comp_matrix* B_blocked = csc2blocked(B_csc,b);
 
     // End timer
     clock_gettime(CLOCK_MONOTONIC, &end);
@@ -113,7 +113,7 @@ void main(int argc, char* argv[]){
 
     clock_gettime(CLOCK_MONOTONIC, &begin);
 
-    block_comp_matrix_2* C_blocked = blocked_bmm_seq(A_blocked,B_blocked);
+    block_comp_matrix* C_blocked = blocked_bmm_seq(A_blocked,B_blocked);
 
     // End timer
     clock_gettime(CLOCK_MONOTONIC, &end);
@@ -125,7 +125,7 @@ void main(int argc, char* argv[]){
 
 
     clock_gettime(CLOCK_MONOTONIC, &begin);
-    comp_matrix* C_csr = blocked_to_csr(C_blocked);
+    comp_matrix* C_csr = blocked2csr(C_blocked);
 
     // End timer
     clock_gettime(CLOCK_MONOTONIC, &end);
@@ -155,8 +155,8 @@ void main(int argc, char* argv[]){
     free_comp_matrix(B_csc);
     free_comp_matrix(C_csr);
 
-    free_blocked_comp_matrix_2(A_blocked);
-    free_blocked_comp_matrix_2(B_blocked);
-    free_blocked_comp_matrix_2(C_blocked);
+    free_block_comp_matrix(A_blocked);
+    free_block_comp_matrix(B_blocked);
+    free_block_comp_matrix(C_blocked);
 
 }
