@@ -76,9 +76,7 @@ comp_matrix *bmm_seq(comp_matrix *A, comp_matrix *B, uint32_t offset) {
 
     //In case the multiplication gives a matrix with zero elements only, retun a NULL matrix
     if(nnz_count == 0){
-        free(C->col);
-        free(C->row);
-        free(C);
+        free_comp_matrix(C);
         C = NULL;
         return C;
     }
@@ -88,7 +86,7 @@ comp_matrix *bmm_seq(comp_matrix *A, comp_matrix *B, uint32_t offset) {
 
     C->row[C->n] = nnz_count;
 
-    //Reduce col index array to correct size
+    //Resize col index array to correct size
     C->col = (uint32_t *)realloc(C->col, C->nnz * sizeof(uint32_t));
 
     return C;
@@ -364,7 +362,7 @@ block_comp_matrix* blocked_bmm_seq(block_comp_matrix* A, block_comp_matrix* B){
 
     C->block_row = (uint32_t*)calloc(n_b+1,sizeof(uint32_t));
     if(C->block_row == NULL){
-        printf("Couldn;t allocate memory for block_row in blocked_bmm_seq.\n");
+        printf("Couldn't allocate memory for block_row in blocked_bmm_seq.\n");
         exit(-1);
     }
      
@@ -471,6 +469,13 @@ block_comp_matrix* blocked_bmm_seq(block_comp_matrix* A, block_comp_matrix* B){
             }
         }
         C->block_row[i+1] = nnz_blocks_found;
+    }
+
+    //If we don't have any non-zero blocks then return a NULL matrix
+    if(nnz_blocks_found==0){
+        free_block_comp_matrix(C);
+        C = NULL;
+        return C;
     }
 
     C->nnz_blocks = nnz_blocks_found;
