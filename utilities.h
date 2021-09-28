@@ -913,10 +913,8 @@ comp_matrix* blocked2csr(block_comp_matrix* blocked){
 
         //For every row of elements in a row of blocks
         for(uint32_t j=0;j<b;++j){
-
             //For every block in this row of blocks
             for(uint32_t k=0;k<blocks_in_row;++k){
-
                 //Index of first element in the j-th row of the k-th block in this row of blocks
                 row_inside_block_start = blocked->blocks[block_row_start+k]->row[j];
 
