@@ -55,7 +55,7 @@ comp_matrix *bmm_seq(comp_matrix *A, comp_matrix *B, uint32_t offset) {
                     nnz_count++;
                     // Extend the C->col array if there are not enough empty cells
                     if (C->nnz == nnz_count) {
-                        C->col = realloc(C->col, 2 * C->nnz * sizeof(uint32_t));
+                        C->col = (uint32_t*)realloc(C->col, 2 * C->nnz * sizeof(uint32_t));
                         if(C->col == NULL){
                             printf("Couldn't reallocate memory for col in bmm_seq.\n");
                             exit(-1);
@@ -94,53 +94,46 @@ comp_matrix *bmm_seq(comp_matrix *A, comp_matrix *B, uint32_t offset) {
 
 
 /**
- * Function that takes two matrices A and B in compressed format and produces
+ * Following the same principle as the previous function,
+ * this function takes two matrices A and B in compressed format and produces
  * the filtered product of those matrices according to a third matrix F.
- * Matrix A is in CSR format, whereas matrices B and F are in CSC format.
- * The function returns the product in CSC format.
+ * Matrices A and F are in CSR format, whereas matrix B is in CSC format.
+ * The function returns the product in CSR format.
  **/
-comp_matrix *bmm_filtered_seq(comp_matrix *A, comp_matrix *B, comp_matrix *F) {
-    // TODO: check if line is entirely correct
-    comp_matrix *C = new_comp_matrix(F->nnz, F->n, "csc");
+comp_matrix *bmm_filtered_seq(comp_matrix *A, comp_matrix *B, comp_matrix *F, uint32_t offset) {
+    // The max non zero values of matrix C is equal to the nnz of F
+    comp_matrix *C = new_comp_matrix(F->nnz, F->n, "csr");
 
-    // Used to fill C->row and C->col
-    uint32_t row_indx = 0;
-    uint32_t col_indx = 0;
-
-    // Used to go through a col in matrix F
-    int start, end;
+    // Used to fill C->row
+    uint32_t nnz_count = 0;
 
     // Pointers used to go through A->col and B->row respectively
-    int ptr_in_col_A, end_in_col_A;
-    int ptr_in_row_B, end_in_row_B;
+    uint32_t A_row_ptr, A_row_end;
+    uint32_t B_col_ptr, B_col_end;
 
-    // Iterate for every column of F
+    // Iterate for every row of F
     for (int i = 0; i < F->n; i++) {
-        // Find the position to start and end the iteration in F->row
-        start = F->col[i];
-        end = F->col[i + 1];
 
-        C->col[i] = col_indx;
+        C->row[i] = nnz_count;
 
-        // Go through every non zero element of the i-th column
-        for (int j = start; j < end; j++) {
-            // Find the row index
-            row_indx = F->row[j];
+        // Go through every non zero element of the i-th row
+        for (int j = F->row[i]; j < F->row[i + 1]; j++) {
+            A_row_ptr = A->row[i];
+            A_row_end = A->row[i + 1];
 
-            ptr_in_col_A = A->row[row_indx];
-            end_in_col_A = A->row[row_indx + 1];
+            B_col_ptr = B->col[F->col[j]-offset];
+            B_col_end = B->col[F->col[j]-offset+1];
 
-            ptr_in_row_B = B->col[i];
-            end_in_row_B = B->col[i + 1];
-
-            while (ptr_in_col_A < end_in_col_A && ptr_in_row_B < end_in_row_B) {
-                if (A->col[ptr_in_col_A] < B->row[ptr_in_row_B]) {
-                    ptr_in_col_A++;
-                } else if (A->col[ptr_in_col_A] > B->row[ptr_in_row_B]) {
-                    ptr_in_row_B++;
-                } else if (A->col[ptr_in_col_A] == B->row[ptr_in_row_B]) {
-                    C->row[col_indx] = row_indx;
-                    col_indx++;
+            while (A_row_ptr < A_row_end && B_col_ptr < B_col_end) {
+                if (A->col[A_row_ptr] < B->row[B_col_ptr]) {
+                    A_row_ptr++;
+                }
+                else if (A->col[A_row_ptr] > B->row[B_col_ptr]) {
+                    B_col_ptr++;
+                } 
+                else {
+                    C->col[nnz_count] = F->col[j];
+                    nnz_count++;
                     break;
                 }
             }
@@ -148,12 +141,12 @@ comp_matrix *bmm_filtered_seq(comp_matrix *A, comp_matrix *B, comp_matrix *F) {
     }
 
     // Change to the true number of non zero values
-    C->nnz = col_indx;
+    C->nnz = nnz_count;
 
-    C->col[C->n] = col_indx;
+    C->row[C->n] = nnz_count;
 
     // Reduce array to correct size
-    C->row = (uint32_t *)realloc(C->row, C->nnz * sizeof(uint32_t));
+    C->col = (uint32_t *)realloc(C->col, C->nnz * sizeof(uint32_t));
 
     return C;
 }
@@ -495,4 +488,166 @@ block_comp_matrix* blocked_bmm_seq(block_comp_matrix* A, block_comp_matrix* B){
 
     return C;
 }
-    //TODO: blocked_bmm_seq_filtered
+
+
+block_comp_matrix *blocked_bmm_seq_filtered(block_comp_matrix *A, block_comp_matrix *B, block_comp_matrix *F){
+    
+    //Check if the corresponding dimensions are correct
+    if(A->n_b != B->n_b || A->n_b != F->n_b){
+        printf("Dimensions of the matrices not matching.\n");
+        return NULL;
+    }
+
+    uint32_t n_b = F->n_b;
+
+    //We assume F is a non-zero matrix
+    uint32_t b = F->blocks[0]->n;
+
+    block_comp_matrix* C = (block_comp_matrix*)malloc(sizeof(block_comp_matrix));
+    if(C==NULL){
+        printf("Couldn't allocate memory for C in blocked_bmm_seq.\n");
+        exit(-1);
+    }
+
+    C->block_row = (uint32_t*)calloc(n_b+1,sizeof(uint32_t));
+    if(C->block_row == NULL){
+        printf("Couldn't allocate memory for block_row in blocked_bmm_seq.\n");
+        exit(-1);
+    }
+     
+    C->block_col = (uint32_t*)malloc(pow(n_b,2)*sizeof(uint32_t));
+    if(C->block_col == NULL){
+        printf("Couldn't allocate memory for block_col in blocked_bmm_seq.\n");
+        exit(-1);
+    }
+
+    C->blocks = (comp_matrix**)malloc(pow(n_b,2)*sizeof(comp_matrix*));
+    if(C->blocks == NULL){
+        printf("Couldn't allocate memory for blocks in blocked_bmm_seq.\n");
+        exit(-1);
+    }
+
+    C->n_b = n_b;
+    C->real_dim = F->real_dim;
+
+    uint32_t F_block_row_start; // First non-zero block in this row of blocks in matrix F
+    uint32_t F_block_row_end;   // Last non-zero block in this row of blocks in matrix F
+
+    uint32_t block_row_start;   //First non-zero block in this row of blocks
+    uint32_t block_row_end;     //Last non-zero block in this row of blocks
+
+    uint32_t block_col_start;   //First non-zero block in this column of blocks
+    uint32_t block_col_end;     //Last non-zero block in this column of blocks
+
+    uint32_t block_row_ptr;     //Iterator through the non-zero blocks of a row of blocks
+    uint32_t block_col_ptr;     //Iterator through the non-zero blocks of a column of blocks
+
+    uint32_t nnz_blocks_found = 0;  //Number of C's non-zero blocks found up to this point
+
+    uint32_t first_match;       //Used as a flag to see whether it is the first time we have matching blocks to apply multiplication to
+
+    comp_matrix* prod = NULL;
+
+    //For each row of blocks in F
+    for(uint32_t i=0;i<n_b;++i){
+        F_block_row_start = F->block_row[i];
+        F_block_row_end = F->block_row[i+1];
+
+        block_row_start = A->block_row[i];
+        block_row_end = A->block_row[i+1];
+
+        //If there aren't any non-zero blocks in this row of blocks in F or A
+        //then there aren't any non-zero blocks in this row of blocks in C either
+        if(F_block_row_start == F_block_row_end || block_row_start == block_row_end){
+            C->block_row[i+1] = C->block_row[i];
+            continue;
+        }
+
+        //For each non zero block of F in the i-th block row
+        for(uint32_t j=F_block_row_start;j<F_block_row_end;++j){
+
+            block_col_start = B->block_col[F->block_col[j]];
+            block_col_end = B->block_col[F->block_col[j]+1];
+
+            //If there aren't any non-zero blocks in this column go to the next one
+            if(block_col_start == block_col_end){
+                continue;
+            }
+            
+            block_row_ptr = block_row_start;
+            block_col_ptr = block_col_start;
+
+            first_match = 0;
+
+            //While there are still non-zero blocks in the row of blocks in A or the column of blocks in B
+            while(block_row_ptr<block_row_end && block_col_ptr<block_col_end){
+                //Search for blocks in A with the same col index as the row index of the blocks in B
+                if(A->block_col[block_row_ptr] > B->block_row[block_col_ptr]){
+                    block_col_ptr++;
+                }
+                else if(A->block_col[block_row_ptr] < B->block_row[block_col_ptr]){
+                    block_row_ptr++;
+                }
+                else{
+                    //In this part we multiply the corresponding blocks
+                    //prod is a csr matrix
+                    prod = bmm_filtered_seq(A->blocks[block_row_ptr],B->blocks[block_col_ptr],F->blocks[j],F->block_col[j]*b);
+
+                    //If it is the first product we calculate for this block of the new blocked matrix
+                    if(first_match==0){
+
+                        //If the multiplication doesn't yield a non-zero matrix then do nothing
+                        if(prod == NULL){
+                            block_col_ptr++;
+                            block_row_ptr++;
+                            continue;
+                        }
+
+                        //Else create a new non-zero block for the new matrix
+                        C->blocks[nnz_blocks_found] = NULL;
+                        C->block_col[nnz_blocks_found] = j;
+                        first_match = 1;
+                        nnz_blocks_found++; 
+
+                    }
+
+                    //No reason to apply union if the product is NULL
+                    if(prod != NULL){
+                        C->blocks[nnz_blocks_found-1] = block_union(C->blocks[nnz_blocks_found-1],prod);
+                        free_comp_matrix(prod); 
+                        prod = NULL;
+                    }
+
+                    block_col_ptr++;
+                    block_row_ptr++;    
+          
+                }
+            }
+        }
+        C->block_row[i+1] = nnz_blocks_found;
+    }
+
+    //If we don't have any non-zero blocks then return a NULL matrix
+    if(nnz_blocks_found==0){
+        free_block_comp_matrix(C);
+        C = NULL;
+        return C;
+    }
+
+    C->nnz_blocks = nnz_blocks_found;
+
+    //Resize the arrays whose size is proportional to the number of non-zero blocks in C
+    C->block_col = (uint32_t*)realloc(C->block_col,nnz_blocks_found*sizeof(uint32_t));
+    if(C->block_col == NULL){
+        printf("Couldn't reallocate memory for block_col in blocked_bmm_seq.\n");
+        exit(-1);
+    }
+
+    C->blocks = (comp_matrix**)realloc(C->blocks,nnz_blocks_found*sizeof(comp_matrix*));
+    if(C->blocks == NULL){
+        printf("Couldn't reallocate memory for blocks in blocked_bmm_seq.\n");
+        exit(-1);
+    }
+
+    return C;
+}
