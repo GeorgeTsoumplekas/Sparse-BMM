@@ -349,7 +349,6 @@ comp_matrix* concat_C_chunks(comp_matrix* result, int rank, int numtasks, int n_
                 row_in_chunk_end = chunks[j]->row[i+1];
 
                 for(uint32_t k=row_in_chunk_start;k<row_in_chunk_end;++k){
-                    //printf("%d\n",chunks[j]->col[k]);
                     C->col[nnz_count] = chunks[j]->col[k] + offset[j];
 
                     nnz_count++;
@@ -712,9 +711,10 @@ block_comp_matrix* concat_blocked_C_chunks(block_comp_matrix* result, int rank, 
     uint32_t* chunks_n_b = NULL;
     uint32_t* offset = NULL;
 
-    comp_matrix* C = NULL;
+    block_comp_matrix* C = NULL;
 
     if(rank==0){
+        printf("%d\n",n_b_total);
         //n_b of each chunk
         chunks_n_b = (uint32_t*)malloc(numtasks*sizeof(uint32_t));
         if(chunks_n_b == NULL){
@@ -724,9 +724,11 @@ block_comp_matrix* concat_blocked_C_chunks(block_comp_matrix* result, int rank, 
         for(int i=0;i<numtasks;++i){
             if(i<numtasks-(n_b_total%numtasks)){
                 chunks_n_b[i] = n_b_total/numtasks;
+                printf("%d\n",chunks_n_b[i]);
             }
             else{
                 chunks_n_b[i] = n_b_total/numtasks + 1;
+                printf("%d\n",chunks_n_b[i]);
             }
         }
 
@@ -738,14 +740,20 @@ block_comp_matrix* concat_blocked_C_chunks(block_comp_matrix* result, int rank, 
     }
 
     if(result == NULL){
-        result = (block_comp_matrix*)malloc(sizeof(comp_matrix));
+        result = (block_comp_matrix*)malloc(sizeof(block_comp_matrix));
         if(result == NULL){
             printf("Couldn't allocate memory for result in concat_blocked_C_chunks process %d.\n",rank);
             exit(-1);
         }
 
         result->nnz_blocks = 0;
-        result->n_b = n_b_total;
+
+        if(rank<numtasks-(n_b_total%numtasks)){
+            result->n_b = n_b_total/numtasks;
+        }
+        else{
+            result->n_b = n_b_total/numtasks + 1;
+        }
 
         result->block_col = NULL;
         result->blocks = NULL;
@@ -764,15 +772,17 @@ block_comp_matrix* concat_blocked_C_chunks(block_comp_matrix* result, int rank, 
         MPI_Isend(result->block_row,n_b_total+1,MPI_UINT32_T,0,2*rank,MPI_COMM_WORLD,&send_reqs[0]);
         MPI_Isend(result->block_col,result->nnz_blocks,MPI_UINT32_T,0,2*rank+1,MPI_COMM_WORLD,&send_reqs[1]);
 
+        MPI_Waitall(2,send_reqs,MPI_STATUSES_IGNORE);
+
         for(int i=0;i<result->nnz_blocks;++i){
-            MPI_Isend(result->blocks[i]->n,1,MPI_UINT32_T,0,4*i+100,MPI_COMM_WORLD,&block_send_reqs[0]);
-            MPI_Isend(result->blocks[i]->nnz,1,MPI_UINT32_T,0,4*i+101,MPI_COMM_WORLD,&block_send_reqs[1]);
+            MPI_Isend(&result->blocks[i]->n,1,MPI_UINT32_T,0,4*i+100,MPI_COMM_WORLD,&block_send_reqs[0]);
+            MPI_Isend(&result->blocks[i]->nnz,1,MPI_UINT32_T,0,4*i+101,MPI_COMM_WORLD,&block_send_reqs[1]);
             MPI_Isend(result->blocks[i]->row,result->blocks[i]->n+1,MPI_UINT32_T,0,4*i+102,MPI_COMM_WORLD,&block_send_reqs[2]);
             MPI_Isend(result->blocks[i]->col,result->blocks[i]->nnz,MPI_UINT32_T,0,4*i+103,MPI_COMM_WORLD,&block_send_reqs[3]);
             MPI_Waitall(4,block_send_reqs,MPI_STATUSES_IGNORE);
         }
 
-        MPI_Waitall(2,send_reqs,MPI_STATUSES_IGNORE);
+        free_block_comp_matrix(result);
     }
 
     if(rank==0){
@@ -817,6 +827,12 @@ block_comp_matrix* concat_blocked_C_chunks(block_comp_matrix* result, int rank, 
                 memcpy(chunks[i]->block_row,result->block_row,(n_b_total+1)*sizeof(uint32_t));
 
                 for(int j=0;j<chunks[i]->nnz_blocks;++j){
+                    chunks[i]->blocks[j] = (comp_matrix*)malloc(sizeof(comp_matrix));
+                    if(chunks[i]->blocks[j] == NULL){
+                        printf("Couldn't allocate memory for chunks[%d]->blocks[%d] in concat_blocked_C_chunks.\n",i,j);
+                        exit(-1);
+                    }
+
                     chunks[i]->blocks[j]->nnz = result->blocks[j]->nnz;
                     chunks[i]->blocks[j]->n = result->blocks[j]->n;
                     
@@ -840,7 +856,15 @@ block_comp_matrix* concat_blocked_C_chunks(block_comp_matrix* result, int rank, 
                 MPI_Irecv(chunks[i]->block_row,n_b_total+1,MPI_UINT32_T,i,2*i,MPI_COMM_WORLD,&rec_reqs[0]);
                 MPI_Irecv(chunks[i]->block_col,chunks[i]->nnz_blocks,MPI_UINT32_T,i,2*i+1,MPI_COMM_WORLD,&rec_reqs[1]);
 
+                MPI_Waitall(2,rec_reqs,MPI_STATUSES_IGNORE);
+
                 for(int j=0;j<chunks[i]->nnz_blocks;++j){
+                    chunks[i]->blocks[j] = (comp_matrix*)malloc(sizeof(comp_matrix));
+                    if(chunks[i]->blocks[j] == NULL){
+                        printf("Couldn't allocate memory for chunks[%d]->blocks[%d] in concat_blocked_C_chunks.\n",i,j);
+                        exit(-1);
+                    }
+
                     MPI_Irecv(&chunks[i]->blocks[j]->n,1,MPI_UINT32_T,i,4*j+100,MPI_COMM_WORLD,&block_rec_reqs[0]);
                     MPI_Irecv(&chunks[i]->blocks[j]->nnz,1,MPI_UINT32_T,i,4*j+101,MPI_COMM_WORLD,&block_rec_reqs[1]);
                     
@@ -863,24 +887,150 @@ block_comp_matrix* concat_blocked_C_chunks(block_comp_matrix* result, int rank, 
                 
                     MPI_Waitall(2,block_rec_reqs_2,MPI_STATUSES_IGNORE);
                 }
+            }
+        }
 
-                MPI_Waitall(2,rec_reqs,MPI_STATUSES_IGNORE);
+        free_block_comp_matrix(result);
+        free(chunks_nnz_blocks);
+        free(chunks_n_b); 
+
+        //Create the final matrix to be returned
+        uint32_t total_nnz_blocks = 0;     //Total number of non-zero blocks in the whole matrix
+        for(int i=0;i<numtasks;++i){
+            total_nnz_blocks += chunks[i]->nnz_blocks;
+        }
+
+        if(total_nnz_blocks==0){
+            return NULL;
+        }
+
+        C = (block_comp_matrix*)malloc(sizeof(block_comp_matrix));
+        if(C == NULL){
+            printf("Couldn't allocate memory for C in concat_blocked_C_chunks.\n");
+            exit(-1);
+        }
+
+        C->n_b = n_b_total;
+        C->nnz_blocks = total_nnz_blocks;
+        C->real_dim = chunks[rank]->real_dim;
+
+        C->block_row = (uint32_t*)malloc((C->n_b+1)*sizeof(uint32_t));
+        if(C->block_row == NULL){
+            printf("Couldn't allocate memory for C->block_row in concat_blocked_C_chunks.\n");
+            exit(-1);
+        }
+
+        C->block_col = (uint32_t*)malloc(C->nnz_blocks*sizeof(uint32_t));
+        if(C->block_col == NULL){
+            printf("Couldn't allocate memory for C->block_col in concat_blocked_C_chunks.\n");
+            exit(-1);
+        }
+
+        C->blocks = (comp_matrix**)malloc(total_nnz_blocks*sizeof(comp_matrix*));
+        if(C->blocks == NULL){
+            printf("Couldn't allocate memory for blocks in concat_blocked_C_chunks.\n");
+            exit(-1);
+        }
+        uint32_t nnz_block_count = 0;   //Number of non-zero blocks found up to this point
+        
+        uint32_t block_row_in_chunk_start, block_row_in_chunk_end;
+
+        offset = (uint32_t*)malloc(numtasks*sizeof(uint32_t));
+        if(offset == NULL){
+            printf("Couldn't allocate memory for offset in concat_blocked_C_chunks.\n");
+            exit(-1);
+        }
+        offset[0] = 0;
+        for(int i=1;i<numtasks;++i){
+            offset[i] = offset[i-1]+chunks[i-1]->n_b;
+        }
+
+        C->block_row[0] = 0;
+
+        for(uint32_t i=0;i<n_b_total;++i){
+            for(uint32_t j=0;j<numtasks;++j){
+
+                if(chunks[j]->nnz_blocks == 0){
+                    continue;
+                }
+
+                block_row_in_chunk_start = chunks[j]->block_row[i];
+                block_row_in_chunk_end = chunks[j]->block_row[i+1];
+
+                for(uint32_t k=block_row_in_chunk_start;k<block_row_in_chunk_end;++k){
+                    C->block_col[nnz_block_count] = chunks[j]->block_col[k] + offset[j];
+
+                    C->blocks[nnz_block_count] = (comp_matrix*)malloc(sizeof(comp_matrix));
+                    if(C->blocks[nnz_block_count] == NULL){
+                        printf("Couldn't allocate memory for C->blocks[%d] in concat_blocked_C_chunks.\n",nnz_block_count);
+                        exit(-1);
+                    }
+
+                    C->blocks[nnz_block_count]->n = chunks[j]->blocks[k]->n;
+                    C->blocks[nnz_block_count]->nnz = chunks[j]->blocks[k]->nnz;
+
+                    C->blocks[nnz_block_count]->row = (uint32_t*)malloc((C->blocks[nnz_block_count]->n+1)*sizeof(uint32_t));
+                    if(C->blocks[nnz_block_count]->row == NULL){
+                        printf("Couldn't allocate memory for C->blocks[%d]->row in concat_blocked_C_chunks.\n",nnz_block_count);
+                        exit(-1);
+                    }
+
+                    C->blocks[nnz_block_count]->col = (uint32_t*)malloc(C->blocks[nnz_block_count]->nnz*sizeof(uint32_t));
+                    if(C->blocks[nnz_block_count]->col == NULL){
+                        printf("Couldn't allocate memory for C->blocks[%d]->col in concat_blocked_C_chunks.\n",nnz_block_count);
+                        exit(-1);
+                    }
+
+                    memcpy(C->blocks[nnz_block_count]->row,chunks[j]->blocks[k]->row,(C->blocks[nnz_block_count]->n+1)*sizeof(uint32_t));
+
+                    for(uint32_t l=0;l<C->blocks[nnz_block_count]->nnz;++l){
+                        C->blocks[nnz_block_count]->col[l] = chunks[j]->blocks[k]->col[l] + offset[j]*C->blocks[nnz_block_count]->n;
+                    }
+                    nnz_block_count++;
+                }
+
             }
 
-            free_block_comp_matrix(result);
-            free(chunks_nnz_blocks);
-            free(chunks_n_b); 
-
-            //Create the final product blocked-csr matrix
-
-            //TODO
+            C->block_row[i+1] = nnz_block_count;
         }
+
+        free(offset);
+
+        for(int i=0;i<numtasks;++i){
+            free_block_comp_matrix(chunks[i]);
+        }
+        free(chunks);
     }
+
+    return C;
 }
 
 
-block_comp_matrix* blocked_bmm_parallel_2(block_comp_matrix* A, block_comp_matrix* B){
+block_comp_matrix* blocked_bmm_parallel_2(block_comp_matrix* A, block_comp_matrix* B, int rank){
 
-    //TODO
+    int numtasks;
+    MPI_Comm_size(MPI_COMM_WORLD,&numtasks);
+
+    A = transmit_blocked_A(A,rank);
+
+    B = transmit_blocked_B_chunks(B,rank);
+
+    block_comp_matrix* C_chunk;
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if(B == NULL){
+        C_chunk = NULL;
+    }
+    else{
+        C_chunk = blocked_bmm_seq(A,B);
+    }
+
+    block_comp_matrix* C = concat_blocked_C_chunks(C_chunk,rank,numtasks,A->n_b);
+
+    free_block_comp_matrix(A);
+    free_block_comp_matrix(B);
+
+    return C;
     
 }
