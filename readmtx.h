@@ -21,7 +21,7 @@ int cmpfunc(const void* a, const void* b) { return (*(int*)a - *(int*)b); }
  *  to be square.
  *
  */
-void coo2csc(comp_matrix* csc, coo_matrix* coo) {
+void coo_to_csc(comp_matrix* csc, coo_matrix* coo) {
     // ----- cannot assume that input is already 0!
     for (uint32_t l = 0; l < csc->n + 1; l++) {
         csc->col[l] = 0;
@@ -73,7 +73,7 @@ void coo2csc(comp_matrix* csc, coo_matrix* coo) {
  *  to be square.
  *
  */
-void coo2csr(comp_matrix* csr, coo_matrix* coo) {
+void coo_to_csr(comp_matrix* csr, coo_matrix* coo) {
     // ----- cannot assume that input is already 0!
     for (uint32_t l = 0; l < csr->n + 1; l++) {
         csr->row[l] = 0;
@@ -169,7 +169,7 @@ comp_matrix* mtx2comp(char* filename, char* type) {
 
     // Acquire the points in the file
     for (i = 0; i < nz; i++) {
-        fscanf(f, "%d %d\n", &coo_row[i], &coo_col[i]);
+        int ign = fscanf(f, "%d %d\n", &coo_row[i], &coo_col[i]);
         coo_row[i]--; /* adjust from 1-based to 0-based */
         coo_col[i]--;
 
@@ -192,17 +192,20 @@ comp_matrix* mtx2comp(char* filename, char* type) {
     coo->row = coo_row;
 
     if (!strcmp(type, "csc")) {
-        comp_matrix* csc = coo2csc(coo);
+        comp_matrix* csc = new_comp_matrix(2 * nz, N, "csc");
+        coo_to_csc(csc, coo);
         free_coo(coo);
         return csc;
+    }
     else if (!strcmp(type, "csr")) {
-        comp_matrix* csr = coo2csr(coo);
+        comp_matrix* csr = new_comp_matrix(2 * nz, M, "csr");
+        coo_to_csr(csr, coo);
         free_coo(coo);
         return csr;
     }
     else {
         printf("Unknown type in function mtx2comp.\n");
-        free_coo(coo)
+        free_coo(coo);
         exit(-1);
     }
 }

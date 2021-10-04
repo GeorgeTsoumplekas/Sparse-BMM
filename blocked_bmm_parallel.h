@@ -191,12 +191,6 @@ comp_matrix* nonblocked_bmm_parallel(comp_matrix* A, comp_matrix* B, int n_threa
             }
         }
 
-        //In case the multiplication gives a matrix with zero elements only, retun a NULL matrix
-        if(nnz_count == 0){
-            free_comp_matrix(csr_chunks[thread_id]);
-            csr_chunks[thread_id] = NULL;
-        }
-
         //Change to the true number of non zero values
         csr_chunks[thread_id]->nnz = nnz_count;
 
@@ -342,7 +336,7 @@ block_comp_matrix* blocked_concat_chunks(block_comp_matrix** chunks, int chunk_n
 
 
 /**
- * Function that performs non-blocked BMM using thread parallelization with OpenMP.
+ * Function that performs blocked BMM using thread parallelization with OpenMP.
  * This function works the same way as the non-blocked parallel bmm with the difference that
  * we use blocked matrices to perform multiplication.
 **/
@@ -541,6 +535,377 @@ block_comp_matrix* blocked_bmm_parallel(block_comp_matrix* A, block_comp_matrix*
 
     //Concatenate the blocked csr matrices of each chunk into one for the whole blocked matrix C
     block_comp_matrix* C = blocked_concat_chunks(blocked_csr_chunks,n_threads,A->n_b,A->real_dim);
+
+    for(uint32_t i=0;i<n_threads;++i){
+        if(blocked_csr_chunks[i]==NULL){
+            continue;
+        }
+        free_block_comp_matrix(blocked_csr_chunks[i]);
+    }
+    free(blocked_csr_chunks);
+
+    free(chunk_size);
+
+    return C;
+}
+
+
+/* ----------------- Functions for the filtered bmm parallel implementation -------------------- */
+
+/**
+ * This function performs a filtered bmm according to matrix F, 
+ * using thread parallelization with OpenMP. The principle is the same with
+ * the function nonblocked_bmm_parallel. Matrices A and F are in CSR format,
+ * matrix B is in CSC format and the product is returned in CSR format.
+**/
+comp_matrix* nonblocked_bmm_parallel_filtered(comp_matrix* A, comp_matrix* B, comp_matrix* F, int n_threads){
+
+    omp_set_num_threads(n_threads);
+
+    if (A->n != F->n){
+        printf("Dimension mismatch in function nonblocked_bmm_parallel_filtered.\n");
+        exit(-1);
+    }
+
+    uint32_t n = F->n;
+
+    //Number of rows of F that each thread will examine
+    int* chunk_size = (int*)malloc(n_threads*sizeof(int));
+    if(chunk_size == NULL){
+        printf("Couldn't allocate memory for chunk_size in nonblocked_bmm_parallel_filtered.\n");
+        exit(-1);
+    }
+
+    //If the size of the matrix is not exactly divisible by the number of threads
+    //then give an extra row to an appropriate number of threads (this is to achieve better
+    //load balance)
+    uint32_t res = n % n_threads;
+    for(int i=0;i<res;++i){
+        chunk_size[i] = n/n_threads + 1;
+    }
+    for(int i=res;i<n_threads;++i){
+        chunk_size[i] = n/n_threads;
+    }
+
+    //matrix containing the chunks (each chunk is represented as a csr matrix)
+    comp_matrix** csr_chunks = (comp_matrix**)malloc(n_threads*sizeof(comp_matrix*));
+    if(csr_chunks == NULL){
+        printf("Couldn't allocate memory for csr_chunks in nonblocked_bmm_parallel_filtered.\n");
+        exit(-1);
+    }   
+
+    // This is roughly the max size of each chunk
+    uint32_t nnz_initial = F->nnz/n_threads;
+
+    for(int i=0;i<n_threads;++i){
+        csr_chunks[i] = new_comp_matrix(nnz_initial,chunk_size[i],"csr");
+    }
+
+    int i,j;    //Iterators used to run through the rows of A and columns of B
+    uint32_t nnz_count = 0; //Non-zero elements found up to this point
+
+
+    #pragma omp parallel shared(A,B,F,csr_chunks) private(i,j) firstprivate(nnz_count)
+    {
+        int thread_id = omp_get_thread_num();
+
+        int i_start;    //Index of the first row that this thread will examine
+
+        if(thread_id>=res){
+            i_start = res*(n/n_threads+1) + (thread_id-res)*(n/n_threads);
+        }
+        else{
+            i_start = thread_id*(n/n_threads+1);
+        }
+
+        uint32_t A_row_ptr, A_row_end;
+        uint32_t B_col_ptr, B_col_end;
+
+        //For every row in the chunk of F
+        for(i=0;i<chunk_size[thread_id];++i){
+            A_row_ptr = A->row[i_start+i];
+            A_row_end = A->row[i_start+i+1];
+
+            csr_chunks[thread_id]->row[i] = nnz_count;
+
+            //For every column in B
+            for(j=F->row[i_start+i];j<F->row[i_start+i+1];++j){
+                B_col_ptr = B->col[F->col[j]];
+                B_col_end = B->col[F->col[j]+1];
+
+                //While there are still non-zero elements in the corresponding row and column
+                while (A_row_ptr < A_row_end && B_col_ptr < B_col_end) {
+                    //If A's current element's column index is smaller than B's current element's row index
+                    if (A->col[A_row_ptr] < B->row[B_col_ptr]) {
+                        A_row_ptr++;
+                    }
+                    //if A's current element's column index is bigger than B's current element's row index
+                    else if (A->col[A_row_ptr] > B->row[B_col_ptr]) {
+                        B_col_ptr++;
+                    }
+                    //If A's current element's column index is matching with B's current element's row index
+                    //then we have a non-zero element in the product chunk in this position
+                    else{
+                        csr_chunks[thread_id]->col[nnz_count] = F->col[j];
+                        nnz_count++;
+
+                        //Extend the col array of the product chunk if there are not enough empty cells
+                        if (csr_chunks[thread_id]->nnz <= nnz_count) {
+                            csr_chunks[thread_id]->col = (uint32_t*)realloc(csr_chunks[thread_id]->col,2*csr_chunks[thread_id]->nnz*sizeof(uint32_t));
+                            if(csr_chunks[thread_id]->col == NULL){
+                                printf("Couldn't reallocate memory for csr_chunks[%d]->col in nonblocked_bmm_parallel_filtered.\n",thread_id);
+                                exit(-1);
+                            }
+                            csr_chunks[thread_id]->nnz = 2*csr_chunks[thread_id]->nnz;
+                        }
+
+                        //If we have already found a non-zero element in this position,
+                        //there is no reason to continue calculating for this row of A and column of B.
+                        break;
+                    }
+                }
+
+                A_row_ptr = A->row[i_start+i];
+            }
+        }        
+
+        //Change to the true number of non zero values
+        csr_chunks[thread_id]->nnz = nnz_count;
+
+        csr_chunks[thread_id]->row[csr_chunks[thread_id]->n] = nnz_count;
+
+        //Resize col index array to correct size
+        csr_chunks[thread_id]->col = (uint32_t *)realloc(csr_chunks[thread_id]->col,csr_chunks[thread_id]->nnz*sizeof(uint32_t));
+
+    }
+
+    //Concatenate the csr matrices of each chunk into one for the whole product matrix
+    comp_matrix* C = concat_chunks(csr_chunks,n_threads,F->n);
+
+    for(uint32_t i=0;i<n_threads;++i){
+        free_comp_matrix(csr_chunks[i]);
+    }
+    free(csr_chunks);
+    free(chunk_size);
+
+    return C;
+}
+
+
+/**
+ * This function performs a filtered bmm according to matrix F, 
+ * using thread parallelization with OpenMP. The principle is the same with
+ * the function blocked_bmm_parallel. Matrices A and F are in blocked CSR format,
+ * matrix B is in blocked CSC format and the product is returned in blocked CSR format.
+**/
+block_comp_matrix* blocked_bmm_parallel_filtered(block_comp_matrix* A, block_comp_matrix* B, block_comp_matrix* F, int n_threads){
+    omp_set_num_threads(n_threads);
+
+    // Check if the corresponding dimensions are correct
+    if (A->n_b != B->n_b || A->n_b != F->n_b) {
+        printf("Dimensions of the matrices not matching.\n");
+        return NULL;
+    }
+
+    uint32_t n_b = F->n_b;
+
+    //Number of rows of blocks that each thread will examine
+    int* chunk_size = (int*)malloc(n_threads*sizeof(int));
+    if(chunk_size == NULL){
+        printf("Couldn;t allocate memory for chunk_size in blocked_bmm_parallel.\n");
+        exit(-1);
+    }
+
+    //If the number of block rows in the matrix is not exactly divisible by the number of threads
+    //then give an extra block row to an appropriate number of threads (this is to achieve better
+    //load balance)
+    uint32_t res = n_b % n_threads;
+    for(int i=0;i<res;++i){
+        chunk_size[i] = n_b/n_threads + 1;
+    }
+    for(int i=res;i<n_threads;++i){
+        chunk_size[i] = n_b/n_threads;
+    }
+
+    //matrix containing the chunks (each chunk is represented as a blocked csr matrix)
+    block_comp_matrix** blocked_csr_chunks = (block_comp_matrix**)malloc(n_threads*sizeof(block_comp_matrix*));
+    if(blocked_csr_chunks == NULL){
+        printf("Couldn't allocate memory for csr_chunks in nonblocked_bmm_parallel.\n");
+        exit(-1);
+    }  
+
+    //We assume F is a non-zero matrix
+    uint32_t b = F->blocks[0]->n;
+
+    for(int i=0;i<n_threads;++i){
+        blocked_csr_chunks[i] = (block_comp_matrix*)malloc(sizeof(block_comp_matrix));
+        if(blocked_csr_chunks[i]==NULL){
+            printf("Couldn't allocate memory for blocked_csr_chunks[%d] in blocked_bmm_parallel.\n",i);
+            exit(-1);
+        }
+
+        blocked_csr_chunks[i]->block_row = (uint32_t*)malloc((chunk_size[i]+1)*sizeof(uint32_t));
+        if(blocked_csr_chunks[i]->block_row == NULL){
+            printf("Couldn't allocate memory for block_row in blocked_bmm_parallel.\n");
+            exit(-1);
+        }
+        
+        blocked_csr_chunks[i]->block_col = (uint32_t*)malloc(chunk_size[i]*n_b*sizeof(uint32_t));
+        if(blocked_csr_chunks[i]->block_col == NULL){
+            printf("Couldn't allocate memory for block_col in blocked_bmm_parallel.\n");
+            exit(-1);
+        }
+
+        blocked_csr_chunks[i]->blocks = (comp_matrix**)malloc(chunk_size[i]*n_b*sizeof(comp_matrix*));
+        if(blocked_csr_chunks[i]->blocks == NULL){
+            printf("Couldn't allocate memory for blocks in blocked_bmm_parallel.\n");
+            exit(-1);
+        }
+
+        blocked_csr_chunks[i]->n_b = chunk_size[i];
+        blocked_csr_chunks[i]->real_dim = F->real_dim;
+    }
+
+    //Number of the product chunks's non-zero blocks found up to this point
+    uint32_t nnz_blocks_found = 0;
+
+    //Used as a flag to see whether it is the first time we have matching blocks to apply multiplication to
+    uint32_t first_match;       
+
+    comp_matrix* prod = NULL;
+
+    #pragma omp parallel shared(A,B,F,blocked_csr_chunks) private(first_match) firstprivate(nnz_blocks_found,prod)
+    {
+        int thread_id = omp_get_thread_num();
+
+        int i_start;    //Index of the first block row that this thread will examine
+        
+        if(thread_id>=res){
+            i_start = res*(n_b/n_threads+1) + (thread_id-res)*(n_b/n_threads);
+        }
+        else{
+            i_start = thread_id*(n_b/n_threads+1);
+        }
+
+        uint32_t F_block_row_start; // First non-zero block in this row of blocks in matrix F
+        uint32_t F_block_row_end;   // Last non-zero block in this row of blocks in matrix F
+
+        uint32_t block_row_start;   //First non-zero block in this row of blocks
+        uint32_t block_row_end;     //Last non-zero block in this row of blocks
+
+        uint32_t block_col_start;   //First non-zero block in this column of blocks
+        uint32_t block_col_end;     //Last non-zero block in this column of blocks
+
+        uint32_t block_row_ptr;     //Iterator through the non-zero blocks of a row of blocks
+        uint32_t block_col_ptr;     //Iterator through the non-zero blocks of a column of blocks
+
+        blocked_csr_chunks[thread_id]->block_row[0] = 0;
+
+        //For each row of blocks in the chunk of F
+        for(uint32_t i=0;i<chunk_size[thread_id];++i){
+            F_block_row_start = F->block_row[i_start+i];
+            F_block_row_end = F->block_row[i_start+i+1];
+
+            block_row_start = A->block_row[i_start+i];
+            block_row_end = A->block_row[i_start+i+1];
+
+            //If there aren't any non-zero blocks in this row of blocks in the chunk
+            //then there aren't any non-zero blocks in this row of blocks in the
+            //corresponding product chunk either
+            if(F_block_row_start == F_block_row_end || block_row_start == block_row_end){
+                blocked_csr_chunks[thread_id]->block_row[i+1] = blocked_csr_chunks[thread_id]->block_row[i];
+                continue;
+            }
+
+            //For each column of blocks in F
+            for(uint32_t j=F_block_row_start;j<F_block_row_end;++j){
+                block_col_start = B->block_col[F->block_col[j]];
+                block_col_end = B->block_col[F->block_col[j]+1];
+                
+                //If there aren't any non-zero blocks in this column go to the next one
+                if(block_col_start == block_col_end){
+                    continue;
+                }
+                
+                block_row_ptr = block_row_start;
+                block_col_ptr = block_col_start;
+
+                first_match = 0;
+
+                //While there are still non-zero blocks in the row of blocks in the chunk or the column of blocks in B
+                while(block_row_ptr<block_row_end && block_col_ptr<block_col_end){
+                    //Search for blocks in the chunk with the same col index as the row index of the blocks in B
+                    if(A->block_col[block_row_ptr] > B->block_row[block_col_ptr]){
+                        block_col_ptr++;
+                    }
+                    else if(A->block_col[block_row_ptr] < B->block_row[block_col_ptr]){
+                        block_row_ptr++;
+                    }
+                    else{
+                        //In this part we multiply the correspondind blocks
+                        //prod is a csr matrix
+                        prod = bmm_filtered_seq(A->blocks[block_row_ptr],B->blocks[block_col_ptr],F->blocks[j],F->block_col[j]*b);
+
+                        //If it is the first product we calculate for this block of the new blocked matrix
+                        if(first_match==0){
+
+                            //If the multiplication doesn't yield a non-zero matrix then do nothing
+                            if(prod == NULL){
+                                block_col_ptr++;
+                                block_row_ptr++;
+                                continue;
+                            }
+
+                            //Else create a new non-zero block for the new matrix
+                            blocked_csr_chunks[thread_id]->blocks[nnz_blocks_found] = NULL;
+                            blocked_csr_chunks[thread_id]->block_col[nnz_blocks_found] = j;
+                            first_match = 1;
+                            nnz_blocks_found++; 
+
+                        }
+
+                        //No reason to apply union if the product is NULL
+                        if(prod != NULL){
+                            blocked_csr_chunks[thread_id]->blocks[nnz_blocks_found-1] = block_union(blocked_csr_chunks[thread_id]->blocks[nnz_blocks_found-1],prod);
+                            free_comp_matrix(prod); 
+                            prod = NULL;
+                        }
+
+                        block_col_ptr++;
+                        block_row_ptr++;    
+            
+                    }
+                }
+            }
+            blocked_csr_chunks[thread_id]->block_row[i+1] = nnz_blocks_found;
+        }
+        
+
+        //In case the multiplication gives a chunks with zero elements only, retun a NULL matrix
+        if(nnz_blocks_found == 0){
+            free_block_comp_matrix(blocked_csr_chunks[thread_id]);
+            blocked_csr_chunks[thread_id] = NULL;
+        }
+
+        blocked_csr_chunks[thread_id]->nnz_blocks = nnz_blocks_found;
+
+        //Resize the arrays whose size is proportional to the number of non-zero blocks in the product chunk
+        blocked_csr_chunks[thread_id]->block_col = (uint32_t*)realloc(blocked_csr_chunks[thread_id]->block_col,nnz_blocks_found*sizeof(uint32_t));
+        if(blocked_csr_chunks[thread_id]->block_col == NULL){
+            printf("Couldn't reallocate memory for block_col in blocked_bmm_parallel.\n");
+            exit(-1);
+        }
+
+        blocked_csr_chunks[thread_id]->blocks = (comp_matrix**)realloc(blocked_csr_chunks[thread_id]->blocks,nnz_blocks_found*sizeof(comp_matrix*));
+        if(blocked_csr_chunks[thread_id]->blocks == NULL){
+            printf("Couldn't reallocate memory for blocks in blocked_bmm_parallel.\n");
+            exit(-1);
+        }
+
+    }
+
+    //Concatenate the blocked csr matrices of each chunk into one for the whole blocked matrix C
+    block_comp_matrix* C = blocked_concat_chunks(blocked_csr_chunks,n_threads,F->n_b,F->real_dim);
 
     for(uint32_t i=0;i<n_threads;++i){
         if(blocked_csr_chunks[i]==NULL){

@@ -140,7 +140,7 @@ coo_matrix* readCOO(char* filename){
     }
 
     //First line of the file contains the size of the square matrix and its number of non-zero elements
-    fscanf(stream,"%u,%u\n",&n,&nnz);
+    int ign = fscanf(stream, "%u,%u\n", &n, &nnz);
 
     coo->row = (uint32_t*)malloc(nnz*sizeof(uint32_t));
     if(coo->row == NULL){
@@ -155,7 +155,7 @@ coo_matrix* readCOO(char* filename){
     }
 
     for(uint32_t i=0;i<nnz;++i){
-        fscanf(stream,"%u,%u\n",&coo->row[i],&coo->col[i]);
+        int ign = fscanf(stream, "%u,%u\n", &coo->row[i], &coo->col[i]);
     }
 
     coo->n = n;
@@ -198,13 +198,13 @@ comp_matrix* new_comp_matrix(uint32_t nnz, uint32_t n, char* type) {
 
     //If we want to create a csc matrix
     if (!strcmp(type, "csc")) {
-        array->col = (uint32_t*)malloc((n + 1) * sizeof(uint32_t));
-        array->row = (uint32_t*)malloc(nnz * sizeof(uint32_t));
+        array->col = (uint32_t*)calloc((n + 1), sizeof(uint32_t));
+        array->row = (uint32_t*)calloc(nnz, sizeof(uint32_t));
     }
     //If we want to create a csr matrix
     else if (!strcmp(type, "csr")) {
-        array->col = (uint32_t*)malloc(nnz * sizeof(uint32_t));
-        array->row = (uint32_t*)malloc((n + 1) * sizeof(uint32_t));
+        array->col = (uint32_t*)calloc(nnz, sizeof(uint32_t));
+        array->row = (uint32_t*)calloc((n + 1), sizeof(uint32_t));
     }
     else {
         printf("Unknown type in new_comp_matrix function.\n");
@@ -1051,32 +1051,32 @@ comp_matrix* blocked2csc(block_comp_matrix* blocked){
     return csc;
 }
 
-    /**
-     * Function that prints a blocked csr matrix.
-     * First it prints the csr arrays we have in the block-level
-     * and then prints the csr arrays of each non-zero block
-     **/
-    void print_blocked_csr(block_comp_matrix * blocked_matrix) {
-        printf("Printing a blocked csr matrix.\n");
+/**
+ * Function that prints a blocked csr matrix.
+ * First it prints the csr arrays we have in the block-level
+ * and then prints the csr arrays of each non-zero block
+ **/
+void print_blocked_csr(block_comp_matrix * blocked_matrix) {
+    printf("Printing a blocked csr matrix.\n");
 
-        printf("Block col: ");
-        for (int i = 0; i < blocked_matrix->nnz_blocks; ++i) {
-            printf("%d ", blocked_matrix->block_col[i]);
-        }
-        printf("\n");
+    printf("Block col: ");
+    for (int i = 0; i < blocked_matrix->nnz_blocks; ++i) {
+        printf("%d ", blocked_matrix->block_col[i]);
+    }
+    printf("\n");
 
-        printf("Block row: ");
-        for (int i = 0; i < blocked_matrix->n_b + 1; ++i) {
-            printf("%d ", blocked_matrix->block_row[i]);
-        }
-        printf("\n");
+    printf("Block row: ");
+    for (int i = 0; i < blocked_matrix->n_b + 1; ++i) {
+        printf("%d ", blocked_matrix->block_row[i]);
+    }
+    printf("\n");
 
-        for (int i = 0; i < blocked_matrix->nnz_blocks; ++i) {
-            printf("Block %d:\n", i);
-            print_csr(blocked_matrix->blocks[i]);
-            printf("\n");
-        }
+    for (int i = 0; i < blocked_matrix->nnz_blocks; ++i) {
+        printf("Block %d:\n", i);
+        print_csr(blocked_matrix->blocks[i]);
         printf("\n");
+    }
+    printf("\n");
 }
 
 
