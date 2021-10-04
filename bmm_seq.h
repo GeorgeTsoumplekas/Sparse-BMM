@@ -17,7 +17,7 @@ comp_matrix *bmm_seq(comp_matrix *A, comp_matrix *B, uint32_t offset) {
     //However, we don't know the value of nnz.
     //We assume it to be roughly A->nnz + B->nnz.
     //If this is not enough the array C->row will be reallocated.
-    comp_matrix *C = new_comp_matrix(A->nnz + B->nnz, B->n, "csr");
+    comp_matrix *C = new_comp_matrix(A->nnz + B->nnz, A->n, "csr");
 
     //Number of non-zero elements in C up to this point
     uint32_t nnz_count = 0;
@@ -342,13 +342,13 @@ comp_matrix* block_union(comp_matrix* A, comp_matrix* B){
  * the simple bmm function.
 **/
 block_comp_matrix* blocked_bmm_seq(block_comp_matrix* A, block_comp_matrix* B){
-
+/*
     //Check if the corresponding dimensions are correct
     if(A->n_b != B->n_b){
         printf("Dimensions of the 2 matrixes not matching.\n");
         return NULL;
     }
-
+*/
     uint32_t n_b = A->n_b;
 
     //We assume A is a non-zero matrix
@@ -409,7 +409,7 @@ block_comp_matrix* blocked_bmm_seq(block_comp_matrix* A, block_comp_matrix* B){
         }
 
         //For each column of blocks in B
-        for(uint32_t j=0;j<n_b;++j){
+        for(uint32_t j=0;j<B->n_b;++j){
             block_col_start = B->block_col[j];
             block_col_end = B->block_col[j+1];
             
