@@ -335,13 +335,6 @@ comp_matrix* block_union(comp_matrix* A, comp_matrix* B){
  * the simple bmm function.
 **/
 block_comp_matrix* blocked_bmm_seq(block_comp_matrix* A, block_comp_matrix* B){
-/*
-    //Check if the corresponding dimensions are correct
-    if(A->n_b != B->n_b){
-        printf("Dimensions of the 2 matrixes not matching.\n");
-        return NULL;
-    }
-*/
     uint32_t n_b = A->n_b;
 
     //We assume A is a non-zero matrix
@@ -464,14 +457,14 @@ block_comp_matrix* blocked_bmm_seq(block_comp_matrix* A, block_comp_matrix* B){
         C->block_row[i+1] = nnz_blocks_found;
     }
 
+    C->nnz_blocks = nnz_blocks_found;
+
     //If we don't have any non-zero blocks then return a NULL matrix
     if(nnz_blocks_found==0){
         free_block_comp_matrix(C);
         C = NULL;
         return C;
     }
-
-    C->nnz_blocks = nnz_blocks_found;
 
     //Resize the arrays whose size is proportional to the number of non-zero blocks in C
     C->block_col = (uint32_t*)realloc(C->block_col,nnz_blocks_found*sizeof(uint32_t));
@@ -491,12 +484,6 @@ block_comp_matrix* blocked_bmm_seq(block_comp_matrix* A, block_comp_matrix* B){
 
 
 block_comp_matrix *blocked_bmm_seq_filtered(block_comp_matrix *A, block_comp_matrix *B, block_comp_matrix *F){
-    
-    //Check if the corresponding dimensions are correct
-    if(A->n_b != B->n_b || A->n_b != F->n_b){
-        printf("Dimensions of the matrices not matching.\n");
-        return NULL;
-    }
 
     uint32_t n_b = F->n_b;
 

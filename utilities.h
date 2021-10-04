@@ -1142,21 +1142,29 @@ uint32_t check_result(char* filename_C,comp_matrix* C){
 
     //Compare the two structs element by element
     if(C->nnz != C_csr_real->nnz){
+        free_coo(C_coo_real);
+        free_comp_matrix(C_csr_real);
         return 0;
     }
 
     if(C->n != C_csr_real->n){
+        free_coo(C_coo_real);
+        free_comp_matrix(C_csr_real);
         return 0;
     }
 
     for(uint32_t i=0;i<C->nnz;++i){
         if(C->col[i] != C_csr_real->col[i]){
+            free_coo(C_coo_real);
+            free_comp_matrix(C_csr_real);
             return 0;
         }
     }
 
     for(uint32_t i=0;i<C->n+1;++i){
         if(C->row[i] != C_csr_real->row[i]){
+            free_coo(C_coo_real);
+            free_comp_matrix(C_csr_real);
             return 0;
         }
     }
@@ -1166,8 +1174,5 @@ uint32_t check_result(char* filename_C,comp_matrix* C){
 
     return 1;
 }
-
-//TODO an ola leitourgoun kala, na dw an mporw kapws na sumpth3w tis sunarthseis
-//wste na mhn einai 3exwrista gia tous csc kai tous csr
 
 #endif
