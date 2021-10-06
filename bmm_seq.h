@@ -1,3 +1,6 @@
+#ifndef BMM_SEQ_H
+#define BMM_SEQ_H
+
 #include "utilities.h"
 #include <string.h>
 
@@ -638,3 +641,5 @@ block_comp_matrix *blocked_bmm_seq_filtered(block_comp_matrix *A, block_comp_mat
 
     return C;
 }
+
+#endif

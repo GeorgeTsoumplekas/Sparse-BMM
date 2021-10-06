@@ -339,7 +339,7 @@ comp_matrix* coo2csr(coo_matrix* coo){
                     row_count++;
                 }
             }
-            //If there are no zero elements only rows in between
+            //If there are no zero-elements-only rows in between
             else{
                 csr->row[row_count] = i;
                 row_count++;

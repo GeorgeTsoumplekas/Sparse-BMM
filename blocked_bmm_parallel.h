@@ -117,7 +117,6 @@ comp_matrix* nonblocked_bmm_parallel(comp_matrix* A, comp_matrix* B, int n_threa
     //product will have, we give it an initial value proportional to the sum of non-zero
     //elements in A and B and if necessary we will resize it later
     int32_t nnz_initial = (A->nnz+B->nnz)/n_threads;
-    printf("%d\n",nnz_initial);
 
     for(int i=0;i<n_threads;++i){
         csr_chunks[i] = new_comp_matrix(nnz_initial,chunk_size[i],"csr");
@@ -173,7 +172,7 @@ comp_matrix* nonblocked_bmm_parallel(comp_matrix* A, comp_matrix* B, int n_threa
 
                         //Extend the col array of the product chunk if there are not enough empty cells
                         if (csr_chunks[thread_id]->nnz <= nnz_count) {
-                            csr_chunks[thread_id]->col = realloc(csr_chunks[thread_id]->col,2*csr_chunks[thread_id]->nnz*sizeof(uint32_t));
+                            csr_chunks[thread_id]->col = (uint32_t*)realloc(csr_chunks[thread_id]->col,2*csr_chunks[thread_id]->nnz*sizeof(uint32_t));
                             if(csr_chunks[thread_id]->col == NULL){
                                 printf("Couldn't reallocate memory for csr_chunks[%d]->col in nonblocked_bmm_parallel.\n",thread_id);
                                 exit(-1);
@@ -448,7 +447,7 @@ block_comp_matrix* blocked_bmm_parallel(block_comp_matrix* A, block_comp_matrix*
             }
 
             //For each column of blocks in B
-            for(uint32_t j=0;j<n_b;++j){
+            for(uint32_t j=0;j<B->n_b;++j){
                 block_col_start = B->block_col[j];
                 block_col_end = B->block_col[j+1];
                 
