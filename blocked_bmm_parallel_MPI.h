@@ -1090,16 +1090,28 @@ block_comp_matrix* blocked_bmm_parallel_2(block_comp_matrix* A, block_comp_matri
 }
 
 
+/************************************************************************/
+/************************ FILTERED FUNCTIONS ****************************/
+/************************************************************************/
+
 /*----------- Functions for the non-blocked parallel filtered implementation -----------*/
 
+/**
+ * This function takes a matrix F in CSR format and crops it according to the 
+ * chucks that matrix B was divided to (see function transmit_B_chunks).
+ * This means that the F->col array in a process will contain only the columns
+ * that are contained in the corresponding B chunk.
+**/ 
 comp_matrix* snip_F(comp_matrix* F, uint32_t total_cols){
 
+    // Find the rank and the number of processes
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
     int numtasks;
     MPI_Comm_size(MPI_COMM_WORLD,&numtasks);
 
+    // These variables hold the min and max column that F can contain according to the rank of the process
     uint32_t min_col;
     uint32_t max_col;
 
@@ -1114,6 +1126,7 @@ comp_matrix* snip_F(comp_matrix* F, uint32_t total_cols){
         max_col = (numtasks-remaining)*total_cols/numtasks + (rank+1-numtasks+remaining)*(total_cols/numtasks+1);
     }
 
+    // Allocate the row and col arrays that will take the place of F->row and F->col respectively
     uint32_t* temp_row = (uint32_t*)malloc((F->n+1) * sizeof(uint32_t));
     if(temp_row == NULL){
         printf("Couldn't allocate memory for temp_row in snip_F, process %d\n",rank);
@@ -1127,9 +1140,11 @@ comp_matrix* snip_F(comp_matrix* F, uint32_t total_cols){
 
     uint32_t snipped_nnz = 0;
 
+    // Iterate every non zero element of F 
     for (int i=0; i<F->n; i++){
         temp_row[i] = snipped_nnz;
         for (int j=F->row[i]; j<F->row[i+1]; j++){
+            // Keep only those whose col index fits the constraints
             if (F->col[j]<max_col && F->col[j]>=min_col){
                 temp_col[snipped_nnz] = F->col[j]-min_col;
                 snipped_nnz++;
@@ -1141,6 +1156,7 @@ comp_matrix* snip_F(comp_matrix* F, uint32_t total_cols){
     free(F->col);
     free(F->row);
 
+    // Realloc col array to correct size
     temp_col = (uint32_t*)realloc(temp_col,snipped_nnz*sizeof(uint32_t));
     if(temp_col == NULL){
         printf("Couldn't reallocate memory for temp_col in snip_F.\n");
@@ -1155,7 +1171,10 @@ comp_matrix* snip_F(comp_matrix* F, uint32_t total_cols){
     
 }
 
-//Transfers matrix F to all processes
+/**
+ * Function similar to tranmit_A.
+ * However, when the F array is sent to all processes, it is later reduced with function snip_F.
+**/
 comp_matrix* transmit_F(comp_matrix* F, int rank, uint32_t total_cols){
 
     if(rank!=0){
@@ -1166,6 +1185,7 @@ comp_matrix* transmit_F(comp_matrix* F, int rank, uint32_t total_cols){
         }
     }
 
+    // Send size and nnz elements of F to all processes
     MPI_Bcast(&F->n,1,MPI_UINT32_T,0,MPI_COMM_WORLD);
     MPI_Bcast(&F->nnz,1,MPI_UINT32_T,0,MPI_COMM_WORLD);
     
@@ -1183,31 +1203,39 @@ comp_matrix* transmit_F(comp_matrix* F, int rank, uint32_t total_cols){
         }
     }
 
+    // Send the col and row arrays of F to all processes
     MPI_Bcast(F->col,F->nnz,MPI_UINT32_T,0,MPI_COMM_WORLD);
     MPI_Bcast(F->row,F->n+1,MPI_UINT32_T,0,MPI_COMM_WORLD);
 
+    // Crop the columns of F according to the rank of the process
     F = snip_F(F,total_cols);
 
     return F;
 }
 
 
-
+/**
+ * Non-blocked MPI-prallelized implementation off the filtered BMM
+**/
 comp_matrix* nonblocked_bmm_parallel_filtered_2(comp_matrix* A, comp_matrix* B, comp_matrix* F, int rank){
 
     int numtasks;
     MPI_Comm_size(MPI_COMM_WORLD,&numtasks);
 
+    // Send matrix A to all processes
     A = transmit_A(A,rank);
 
+    // Acquire the number of columns and tranmit it to all processes
     uint32_t total_cols;
     if (rank == 0){
         total_cols = B->n;
     }
     MPI_Bcast(&total_cols,1,MPI_UINT32_T,0,MPI_COMM_WORLD);
 
+    // Send matrix F to all processes
     F = transmit_F(F,rank,total_cols);
 
+    // Send a chunk of B to each process
     B = transmit_B_chunks(B,rank);
 
     comp_matrix* C_chunk = NULL;
@@ -1220,6 +1248,7 @@ comp_matrix* nonblocked_bmm_parallel_filtered_2(comp_matrix* A, comp_matrix* B, 
         C_chunk = bmm_filtered_seq(A,B,F,0);
     }
 
+    // Concatenate the product chinks of each process to create the final product matrix
     comp_matrix* C = concat_C_chunks(C_chunk,rank,numtasks,F->n);
 
     free_comp_matrix(A);
@@ -1233,14 +1262,19 @@ comp_matrix* nonblocked_bmm_parallel_filtered_2(comp_matrix* A, comp_matrix* B, 
 
 /* ------------ Functions for the blocked parallel filtered implementation ------------- */
 
+/**
+ * Function similar to snip_F function with the difference that now F is in blocked csr format.
+**/
 block_comp_matrix* snip_blocked_F(block_comp_matrix* F, uint32_t total_block_cols){
 
+    // Find the rank and the number of processes
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
     int numtasks;
     MPI_Comm_size(MPI_COMM_WORLD,&numtasks);
 
+    // These variables hold the min and max block column that F can contain according to the rank of the process
     uint32_t min_block_col;
     uint32_t max_block_col;
 
@@ -1256,6 +1290,7 @@ block_comp_matrix* snip_blocked_F(block_comp_matrix* F, uint32_t total_block_col
         max_block_col = previous_block_cols + (rank+1-numtasks+remaining)*(total_block_cols/numtasks+1);
     }
 
+    // Allocate memory for the arrays that will replace the components of blocked F
     uint32_t* temp_block_row = (uint32_t*)malloc((F->n_b+1) * sizeof(uint32_t));
     if(temp_block_row == NULL){
         printf("Couldn't allocate memory for temp_block_row in snip_blocked_F, process %d\n",rank);
@@ -1274,15 +1309,18 @@ block_comp_matrix* snip_blocked_F(block_comp_matrix* F, uint32_t total_block_col
 
     uint32_t snipped_nnz_blocks = 0;
 
+    // Iterate every non zero block of F
     for (int i=0; i<F->n_b; i++){
         temp_block_row[i] = snipped_nnz_blocks;
 
         for (int j=F->block_row[i]; j<F->block_row[i+1]; j++){
             if (F->block_col[j]<max_block_col && F->block_col[j]>=min_block_col){
+                // Passes the true index of the column
                 temp_block_col[snipped_nnz_blocks] = F->block_col[j];
 
                 temp_blocks[snipped_nnz_blocks] = new_comp_matrix(F->blocks[j]->nnz, F->blocks[j]->n, "csr");
 
+                // Copy the corresponding block to the new blocks array
                 memcpy(temp_blocks[snipped_nnz_blocks]->col, F->blocks[j]->col, F->blocks[j]->nnz*sizeof(uint32_t));
                 memcpy(temp_blocks[snipped_nnz_blocks]->row, F->blocks[j]->row, (F->blocks[j]->n+1)*sizeof(uint32_t));
 
@@ -1292,6 +1330,7 @@ block_comp_matrix* snip_blocked_F(block_comp_matrix* F, uint32_t total_block_col
     }
     temp_block_row[F->n_b] = snipped_nnz_blocks;
 
+    // Free unnecessary memory
     free(F->block_col);
     free(F->block_row);
     for (int i=0; i<F->nnz_blocks; i++){
@@ -1299,6 +1338,7 @@ block_comp_matrix* snip_blocked_F(block_comp_matrix* F, uint32_t total_block_col
     }
     free(F->blocks);
 
+    // Reallocate to the proper sizes
     temp_block_col = (uint32_t*)realloc(temp_block_col,snipped_nnz_blocks*sizeof(uint32_t));
     if(temp_block_col == NULL){
         printf("Couldn't reallocate memory for temp_block_col in snip_blocked_F.\n");
@@ -1310,6 +1350,7 @@ block_comp_matrix* snip_blocked_F(block_comp_matrix* F, uint32_t total_block_col
         exit(-1);
     }
 
+    // Pass the new values and arrays to F
     F->block_col = temp_block_col;
     F->block_row = temp_block_row;
     F->blocks = temp_blocks;
@@ -1319,7 +1360,9 @@ block_comp_matrix* snip_blocked_F(block_comp_matrix* F, uint32_t total_block_col
     
 }
 
-
+/**
+ * Function similar to transmit_F function with the difference that now F is in blocked csr format.
+**/
 block_comp_matrix* transmit_blocked_F(block_comp_matrix* F, int rank, uint32_t total_block_cols){
 
     if(rank!=0){
@@ -1330,6 +1373,7 @@ block_comp_matrix* transmit_blocked_F(block_comp_matrix* F, int rank, uint32_t t
         }
     }
 
+    // Send size, nnz elements and real dimension of F to all processes
     MPI_Bcast(&F->n_b,1,MPI_UINT32_T,0,MPI_COMM_WORLD);
     MPI_Bcast(&F->nnz_blocks,1,MPI_UINT32_T,0,MPI_COMM_WORLD);
     MPI_Bcast(&F->real_dim,1,MPI_UINT32_T,0,MPI_COMM_WORLD);
@@ -1357,41 +1401,50 @@ block_comp_matrix* transmit_blocked_F(block_comp_matrix* F, int rank, uint32_t t
         }
     }
 
+    // Send the block col and block row arrays of F to all processes
     MPI_Bcast(F->block_col,F->nnz_blocks,MPI_UINT32_T,0,MPI_COMM_WORLD);
     MPI_Bcast(F->block_row,F->n_b+1,MPI_UINT32_T,0,MPI_COMM_WORLD);
 
+    // Send all blockes to all processes (each block in csr format)
     for(int i=0;i<F->nnz_blocks;++i){
         F->blocks[i] = transmit_A(F->blocks[i],rank);
     }
 
+    // Crop the blocked columns of F according to the rank of the process
     F = snip_blocked_F(F,total_block_cols);
 
     return F;
 }
 
-
-
+/**
+ * Blocked MPI-parallelized implementation of the filtered BMM
+**/
 block_comp_matrix* blocked_bmm_parallel_filtered_2(block_comp_matrix* A, block_comp_matrix* B, block_comp_matrix* F, int rank){
 
     int numtasks;
     MPI_Comm_size(MPI_COMM_WORLD,&numtasks);
 
+    // Send matrix A to all processes
     A = transmit_blocked_A(A,rank);
 
+    // Acquire the number of blocked columns and tranmit it to all processes
     uint32_t n_b;
     if (rank == 0){
         n_b = B->n_b;
     }
     MPI_Bcast(&n_b,1,MPI_UINT32_T,0,MPI_COMM_WORLD);
 
+    // Send matrix F to all processes
     F = transmit_blocked_F(F,rank,n_b);
 
+    // Send a chunk of matrix B to each process
     B = transmit_blocked_B_chunks(B,rank);
 
     block_comp_matrix* C_chunk;
 
     MPI_Barrier(MPI_COMM_WORLD);
 
+    // Calculate the offset(real index) of the first block column of the reduced F matrix
     uint32_t offset;
     int remaining = n_b%numtasks;
     if (rank < numtasks-remaining){
@@ -1402,6 +1455,7 @@ block_comp_matrix* blocked_bmm_parallel_filtered_2(block_comp_matrix* A, block_c
         offset = previous_block_cols + (rank-numtasks+remaining)*(n_b/numtasks+1);
     }
 
+    // Find the value of each chunk of C
     if(B == NULL){
         C_chunk = NULL;
     }
@@ -1409,12 +1463,14 @@ block_comp_matrix* blocked_bmm_parallel_filtered_2(block_comp_matrix* A, block_c
         C_chunk = blocked_bmm_seq_filtered(A,B,F,offset);
     }
 
+    // Subtract the min column from every col array of the blocks, cause it will be added later in concat_blocked_C_chunks
     for (int i=0; i<C_chunk->nnz_blocks; i++){
         for(int j=0; j<C_chunk->blocks[i]->nnz; j++){
             C_chunk->blocks[i]->col[j] = C_chunk->blocks[i]->col[j] - rank*C_chunk->blocks[i]->n;
         }
     }
 
+    // Concatenate the product chinks of each process to create the final product matrix
     block_comp_matrix* C = concat_blocked_C_chunks(C_chunk,rank,numtasks,F->n_b);
 
     free_block_comp_matrix(A);

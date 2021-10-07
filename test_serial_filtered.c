@@ -161,7 +161,7 @@ int main(int argc, char* argv[]) {
     // Start timer
     clock_gettime(CLOCK_MONOTONIC, &begin);
 
-    block_comp_matrix* C_blocked = blocked_bmm_seq_filtered(A_blocked, B_blocked, F_blocked);
+    block_comp_matrix* C_blocked = blocked_bmm_seq_filtered(A_blocked, B_blocked, F_blocked,0);
 
     // End timer
     clock_gettime(CLOCK_MONOTONIC, &end);

@@ -697,11 +697,11 @@ comp_matrix* nonblocked_bmm_parallel_filtered(comp_matrix* A, comp_matrix* B, co
  * the function blocked_bmm_parallel. Matrices A and F are in blocked CSR format,
  * matrix B is in blocked CSC format and the product is returned in blocked CSR format.
 **/
-block_comp_matrix* blocked_bmm_parallel_filtered(block_comp_matrix* A, block_comp_matrix* B, block_comp_matrix* F, int n_threads){
+block_comp_matrix* blocked_bmm_parallel_filtered(block_comp_matrix* A, block_comp_matrix* B, block_comp_matrix* F, int n_threads, uint32_t offset){
     omp_set_num_threads(n_threads);
 
     // Check if the corresponding dimensions are correct
-    if (A->n_b != B->n_b || A->n_b != F->n_b) {
+    if (A->n_b != F->n_b) {
         printf("Dimensions of the matrices not matching.\n");
         return NULL;
     }
@@ -818,8 +818,8 @@ block_comp_matrix* blocked_bmm_parallel_filtered(block_comp_matrix* A, block_com
 
             //For each column of blocks in F
             for(uint32_t j=F_block_row_start;j<F_block_row_end;++j){
-                block_col_start = B->block_col[F->block_col[j]];
-                block_col_end = B->block_col[F->block_col[j]+1];
+                block_col_start = B->block_col[F->block_col[j]-offset];
+                block_col_end = B->block_col[F->block_col[j]-offset+1];
                 
                 //If there aren't any non-zero blocks in this column go to the next one
                 if(block_col_start == block_col_end){
