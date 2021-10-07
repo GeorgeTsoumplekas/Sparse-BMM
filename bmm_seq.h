@@ -486,7 +486,7 @@ block_comp_matrix* blocked_bmm_seq(block_comp_matrix* A, block_comp_matrix* B){
 }
 
 
-block_comp_matrix *blocked_bmm_seq_filtered(block_comp_matrix *A, block_comp_matrix *B, block_comp_matrix *F){
+block_comp_matrix *blocked_bmm_seq_filtered(block_comp_matrix *A, block_comp_matrix *B, block_comp_matrix *F, uint32_t offset){
 
     uint32_t n_b = F->n_b;
 
@@ -556,8 +556,8 @@ block_comp_matrix *blocked_bmm_seq_filtered(block_comp_matrix *A, block_comp_mat
         //For each non zero block of F in the i-th block row
         for(uint32_t j=F_block_row_start;j<F_block_row_end;++j){
 
-            block_col_start = B->block_col[F->block_col[j]];
-            block_col_end = B->block_col[F->block_col[j]+1];
+            block_col_start = B->block_col[F->block_col[j]-offset];
+            block_col_end = B->block_col[F->block_col[j]-offset+1];
 
             //If there aren't any non-zero blocks in this column go to the next one
             if(block_col_start == block_col_end){
@@ -595,7 +595,7 @@ block_comp_matrix *blocked_bmm_seq_filtered(block_comp_matrix *A, block_comp_mat
 
                         //Else create a new non-zero block for the new matrix
                         C->blocks[nnz_blocks_found] = NULL;
-                        C->block_col[nnz_blocks_found] = j;
+                        C->block_col[nnz_blocks_found] = F->block_col[j];
                         first_match = 1;
                         nnz_blocks_found++; 
 

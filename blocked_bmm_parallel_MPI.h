@@ -714,7 +714,6 @@ block_comp_matrix* concat_blocked_C_chunks(block_comp_matrix* result, int rank, 
     block_comp_matrix* C = NULL;
 
     if(rank==0){
-        printf("%d\n",n_b_total);
         //n_b of each chunk
         chunks_n_b = (uint32_t*)malloc(numtasks*sizeof(uint32_t));
         if(chunks_n_b == NULL){
@@ -1085,6 +1084,342 @@ block_comp_matrix* blocked_bmm_parallel_2(block_comp_matrix* A, block_comp_matri
 
     free_block_comp_matrix(A);
     free_block_comp_matrix(B);
+
+    return C;
+    
+}
+
+
+/*----------- Functions for the non-blocked parallel filtered implementation -----------*/
+
+comp_matrix* snip_F(comp_matrix* F, uint32_t total_cols){
+
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+    int numtasks;
+    MPI_Comm_size(MPI_COMM_WORLD,&numtasks);
+
+    uint32_t min_col;
+    uint32_t max_col;
+
+    int remaining = total_cols%numtasks;
+    
+    if (rank < numtasks-remaining){
+        min_col = rank * total_cols/numtasks;
+        max_col = (rank + 1) * total_cols/numtasks;
+    }
+    else{
+        min_col = (numtasks-remaining)*total_cols/numtasks + (rank-numtasks+remaining)*(total_cols/numtasks+1);
+        max_col = (numtasks-remaining)*total_cols/numtasks + (rank+1-numtasks+remaining)*(total_cols/numtasks+1);
+    }
+
+    uint32_t* temp_row = (uint32_t*)malloc((F->n+1) * sizeof(uint32_t));
+    if(temp_row == NULL){
+        printf("Couldn't allocate memory for temp_row in snip_F, process %d\n",rank);
+        exit(-1);
+    }
+    uint32_t* temp_col = (uint32_t*)malloc(F->nnz * sizeof(uint32_t));
+    if(temp_col == NULL){
+        printf("Couldn't allocate memory for temp_col in snip_F, process %d\n",rank);
+        exit(-1);
+    }
+
+    uint32_t snipped_nnz = 0;
+
+    for (int i=0; i<F->n; i++){
+        temp_row[i] = snipped_nnz;
+        for (int j=F->row[i]; j<F->row[i+1]; j++){
+            if (F->col[j]<max_col && F->col[j]>=min_col){
+                temp_col[snipped_nnz] = F->col[j]-min_col;
+                snipped_nnz++;
+            }
+        }
+    }
+    temp_row[F->n] = snipped_nnz;
+
+    free(F->col);
+    free(F->row);
+
+    temp_col = (uint32_t*)realloc(temp_col,snipped_nnz*sizeof(uint32_t));
+    if(temp_col == NULL){
+        printf("Couldn't reallocate memory for temp_col in snip_F.\n");
+        exit(-1);
+    }
+
+    F->col = temp_col;
+    F->row = temp_row;
+    F->nnz = snipped_nnz;
+
+    return F;
+    
+}
+
+//Transfers matrix F to all processes
+comp_matrix* transmit_F(comp_matrix* F, int rank, uint32_t total_cols){
+
+    if(rank!=0){
+        F = (comp_matrix*)malloc(sizeof(comp_matrix));
+        if(F == NULL){
+            printf("Couldn't allocate memory for F in transmit_F, process %d\n",rank);
+            exit(-1);
+        }
+    }
+
+    MPI_Bcast(&F->n,1,MPI_UINT32_T,0,MPI_COMM_WORLD);
+    MPI_Bcast(&F->nnz,1,MPI_UINT32_T,0,MPI_COMM_WORLD);
+    
+    if(rank!=0){
+        F->col = (uint32_t*)malloc(F->nnz*sizeof(uint32_t));
+        if(F->col == NULL){
+            printf("Couldn't allocate memory for F->col in transmit_F, process %d\n",rank);
+            exit(-1);
+        }
+
+        F->row = (uint32_t*)malloc((F->n+1)*sizeof(uint32_t));
+        if(F->row == NULL){
+            printf("Couldn't allocate memory for F->row in transmit_F, process %d\n",rank);
+            exit(-1);
+        }
+    }
+
+    MPI_Bcast(F->col,F->nnz,MPI_UINT32_T,0,MPI_COMM_WORLD);
+    MPI_Bcast(F->row,F->n+1,MPI_UINT32_T,0,MPI_COMM_WORLD);
+
+    F = snip_F(F,total_cols);
+
+    return F;
+}
+
+
+
+comp_matrix* nonblocked_bmm_parallel_filtered_2(comp_matrix* A, comp_matrix* B, comp_matrix* F, int rank){
+
+    int numtasks;
+    MPI_Comm_size(MPI_COMM_WORLD,&numtasks);
+
+    A = transmit_A(A,rank);
+
+    uint32_t total_cols;
+    if (rank == 0){
+        total_cols = B->n;
+    }
+    MPI_Bcast(&total_cols,1,MPI_UINT32_T,0,MPI_COMM_WORLD);
+
+    F = transmit_F(F,rank,total_cols);
+
+    B = transmit_B_chunks(B,rank);
+
+    comp_matrix* C_chunk = NULL;
+
+    if(B == NULL){
+        C_chunk = NULL;
+        printf("C is null\n");
+    }
+    else{
+        C_chunk = bmm_filtered_seq(A,B,F,0);
+    }
+
+    comp_matrix* C = concat_C_chunks(C_chunk,rank,numtasks,F->n);
+
+    free_comp_matrix(A);
+    free_comp_matrix(B);
+    free_comp_matrix(F);    
+
+    return C;
+}
+
+
+
+/* ------------ Functions for the blocked parallel filtered implementation ------------- */
+
+block_comp_matrix* snip_blocked_F(block_comp_matrix* F, uint32_t total_block_cols){
+
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+    int numtasks;
+    MPI_Comm_size(MPI_COMM_WORLD,&numtasks);
+
+    uint32_t min_block_col;
+    uint32_t max_block_col;
+
+    int remaining = total_block_cols%numtasks;
+    
+    if (rank < numtasks-remaining){
+        min_block_col = rank * total_block_cols/numtasks;
+        max_block_col = (rank + 1) * total_block_cols/numtasks;
+    }
+    else{
+        uint32_t previous_block_cols = (numtasks-remaining)*total_block_cols/numtasks;
+        min_block_col = previous_block_cols + (rank-numtasks+remaining)*(total_block_cols/numtasks+1);
+        max_block_col = previous_block_cols + (rank+1-numtasks+remaining)*(total_block_cols/numtasks+1);
+    }
+
+    uint32_t* temp_block_row = (uint32_t*)malloc((F->n_b+1) * sizeof(uint32_t));
+    if(temp_block_row == NULL){
+        printf("Couldn't allocate memory for temp_block_row in snip_blocked_F, process %d\n",rank);
+        exit(-1);
+    }
+    uint32_t* temp_block_col = (uint32_t*)malloc(F->nnz_blocks * sizeof(uint32_t));
+    if(temp_block_col == NULL){
+        printf("Couldn't allocate memory for temp_block_col in snip_blocked_F, process %d\n",rank);
+        exit(-1);
+    }
+    comp_matrix** temp_blocks = (comp_matrix**)malloc(F->nnz_blocks*sizeof(comp_matrix*));
+    if(temp_blocks == NULL){
+        printf("Couldn't allocate memory for temp_blocks in snip_blocked_F, process %d\n",rank);
+        exit(-1);
+    }
+
+    uint32_t snipped_nnz_blocks = 0;
+
+    for (int i=0; i<F->n_b; i++){
+        temp_block_row[i] = snipped_nnz_blocks;
+
+        for (int j=F->block_row[i]; j<F->block_row[i+1]; j++){
+            if (F->block_col[j]<max_block_col && F->block_col[j]>=min_block_col){
+                temp_block_col[snipped_nnz_blocks] = F->block_col[j];
+
+                temp_blocks[snipped_nnz_blocks] = new_comp_matrix(F->blocks[j]->nnz, F->blocks[j]->n, "csr");
+
+                memcpy(temp_blocks[snipped_nnz_blocks]->col, F->blocks[j]->col, F->blocks[j]->nnz*sizeof(uint32_t));
+                memcpy(temp_blocks[snipped_nnz_blocks]->row, F->blocks[j]->row, (F->blocks[j]->n+1)*sizeof(uint32_t));
+
+                snipped_nnz_blocks++;
+            }
+        }
+    }
+    temp_block_row[F->n_b] = snipped_nnz_blocks;
+
+    free(F->block_col);
+    free(F->block_row);
+    for (int i=0; i<F->nnz_blocks; i++){
+        free_comp_matrix(F->blocks[i]);
+    }
+    free(F->blocks);
+
+    temp_block_col = (uint32_t*)realloc(temp_block_col,snipped_nnz_blocks*sizeof(uint32_t));
+    if(temp_block_col == NULL){
+        printf("Couldn't reallocate memory for temp_block_col in snip_blocked_F.\n");
+        exit(-1);
+    }
+    temp_blocks = (comp_matrix**)realloc(temp_blocks,snipped_nnz_blocks*sizeof(comp_matrix*));
+    if(temp_blocks == NULL){
+        printf("Couldn't reallocate memory for temp_blocks in snip_blocked_F.\n");
+        exit(-1);
+    }
+
+    F->block_col = temp_block_col;
+    F->block_row = temp_block_row;
+    F->blocks = temp_blocks;
+    F->nnz_blocks = snipped_nnz_blocks;
+
+    return F;
+    
+}
+
+
+block_comp_matrix* transmit_blocked_F(block_comp_matrix* F, int rank, uint32_t total_block_cols){
+
+    if(rank!=0){
+        F = (block_comp_matrix*)malloc(sizeof(block_comp_matrix));
+        if(F == NULL){
+            printf("Couldn't allocate memory for F in transmit_blocked_F, process %d\n",rank);
+            exit(-1);
+        }
+    }
+
+    MPI_Bcast(&F->n_b,1,MPI_UINT32_T,0,MPI_COMM_WORLD);
+    MPI_Bcast(&F->nnz_blocks,1,MPI_UINT32_T,0,MPI_COMM_WORLD);
+    MPI_Bcast(&F->real_dim,1,MPI_UINT32_T,0,MPI_COMM_WORLD);
+
+    if(rank!=0){
+        F->block_col = (uint32_t*)malloc(F->nnz_blocks*sizeof(uint32_t));
+        if(F->block_col == NULL){
+            printf("Couldn't allocate memory for F->block_col in transmit_blocked_F, process %d\n",rank);
+            exit(-1);
+        }
+
+        F->block_row = (uint32_t*)malloc((F->n_b+1)*sizeof(uint32_t));
+        if(F->block_row == NULL){
+            printf("Couldn't allocate memory for F->block_row in transmit_blocked_F, process %d\n",rank);
+            exit(-1);
+        }
+
+        F->blocks = (comp_matrix**)malloc(F->nnz_blocks*sizeof(comp_matrix*));
+        if(F->blocks == NULL){
+            printf("Couldn't allocate memory for F->blocks in transmit_blocked_F, process %d\n",rank);
+            exit(-1);
+        }
+        for(int i=0;i<F->nnz_blocks;++i){
+            F->blocks[i] = NULL;
+        }
+    }
+
+    MPI_Bcast(F->block_col,F->nnz_blocks,MPI_UINT32_T,0,MPI_COMM_WORLD);
+    MPI_Bcast(F->block_row,F->n_b+1,MPI_UINT32_T,0,MPI_COMM_WORLD);
+
+    for(int i=0;i<F->nnz_blocks;++i){
+        F->blocks[i] = transmit_A(F->blocks[i],rank);
+    }
+
+    F = snip_blocked_F(F,total_block_cols);
+
+    return F;
+}
+
+
+
+block_comp_matrix* blocked_bmm_parallel_filtered_2(block_comp_matrix* A, block_comp_matrix* B, block_comp_matrix* F, int rank){
+
+    int numtasks;
+    MPI_Comm_size(MPI_COMM_WORLD,&numtasks);
+
+    A = transmit_blocked_A(A,rank);
+
+    uint32_t n_b;
+    if (rank == 0){
+        n_b = B->n_b;
+    }
+    MPI_Bcast(&n_b,1,MPI_UINT32_T,0,MPI_COMM_WORLD);
+
+    F = transmit_blocked_F(F,rank,n_b);
+
+    B = transmit_blocked_B_chunks(B,rank);
+
+    block_comp_matrix* C_chunk;
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    uint32_t offset;
+    int remaining = n_b%numtasks;
+    if (rank < numtasks-remaining){
+        offset = rank * n_b/numtasks;
+    }
+    else{
+        uint32_t previous_block_cols = (numtasks-remaining)*n_b/numtasks;
+        offset = previous_block_cols + (rank-numtasks+remaining)*(n_b/numtasks+1);
+    }
+
+    if(B == NULL){
+        C_chunk = NULL;
+    }
+    else{
+        C_chunk = blocked_bmm_seq_filtered(A,B,F,offset);
+    }
+
+    for (int i=0; i<C_chunk->nnz_blocks; i++){
+        for(int j=0; j<C_chunk->blocks[i]->nnz; j++){
+            C_chunk->blocks[i]->col[j] = C_chunk->blocks[i]->col[j] - rank*C_chunk->blocks[i]->n;
+        }
+    }
+
+    block_comp_matrix* C = concat_blocked_C_chunks(C_chunk,rank,numtasks,F->n_b);
+
+    free_block_comp_matrix(A);
+    free_block_comp_matrix(B);
+    free_block_comp_matrix(F);
 
     return C;
     

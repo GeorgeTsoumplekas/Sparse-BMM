@@ -857,7 +857,7 @@ block_comp_matrix* blocked_bmm_parallel_filtered(block_comp_matrix* A, block_com
 
                             //Else create a new non-zero block for the new matrix
                             blocked_csr_chunks[thread_id]->blocks[nnz_blocks_found] = NULL;
-                            blocked_csr_chunks[thread_id]->block_col[nnz_blocks_found] = j;
+                            blocked_csr_chunks[thread_id]->block_col[nnz_blocks_found] = F->block_col[j];
                             first_match = 1;
                             nnz_blocks_found++; 
 
