@@ -5,7 +5,11 @@
 
 /*----------- Functions for the non-blocked parallel implementation -----------*/
 
-//Transfers matrix A to all processes
+
+/**
+ * Function that transmits csr matrix A from the root process to all the other processes.
+ * By the time it's done, each process has a copy of the whole csr matrix A.
+**/ 
 comp_matrix* transmit_A(comp_matrix* A, int rank){
 
     if(rank!=0){
@@ -16,6 +20,7 @@ comp_matrix* transmit_A(comp_matrix* A, int rank){
         }
     }
 
+    //Send size and number of non-zero elements of A to all processes
     MPI_Bcast(&A->n,1,MPI_UINT32_T,0,MPI_COMM_WORLD);
     MPI_Bcast(&A->nnz,1,MPI_UINT32_T,0,MPI_COMM_WORLD);
     
@@ -33,13 +38,18 @@ comp_matrix* transmit_A(comp_matrix* A, int rank){
         }
     }
 
+    //Send row and column array to all processes
     MPI_Bcast(A->col,A->nnz,MPI_UINT32_T,0,MPI_COMM_WORLD);
     MPI_Bcast(A->row,A->n+1,MPI_UINT32_T,0,MPI_COMM_WORLD);
 
     return A;
 }
 
-//Transfers a chunk of B to each process
+/**
+ * This function splits B into chunks and sends each chunk to a different process.
+ * This way each process has to calculate only the product of matrix A with this chunk of B.
+ * Chunks are in csc format and are created by splitting B into vertical stripes (B is split column-wise)
+**/
 comp_matrix* transmit_B_chunks(comp_matrix* B, int rank){
 
     if(rank!=0){
@@ -55,9 +65,8 @@ comp_matrix* transmit_B_chunks(comp_matrix* B, int rank){
 
     MPI_Request reqs[numtasks-1];
     MPI_Request req_extra[numtasks-1];
-    MPI_Status status;
 
-    uint32_t n_total;
+    uint32_t n_total;   //Number of rows (columns) of the whole matrix B
 
     if(rank==0){
         n_total = B->n;
@@ -65,20 +74,26 @@ comp_matrix* transmit_B_chunks(comp_matrix* B, int rank){
 
     MPI_Bcast(&n_total,1,MPI_UINT32_T,0,MPI_COMM_WORLD);
 
+    //Array that stores the number of columns each chunk has
     int* col_sendcounts = (int*)malloc(numtasks*sizeof(int));
     if(col_sendcounts == NULL){
         printf("Couldn't allocate memory for col_sendcounts in transmit_B_chunks, process %d\n",rank);
         exit(-1);
     }
+
+    //In order to achieve a better split if the number of columns is not exactly divided by the
+    //number of processes we split the remainder to the processes. This way we have if rem is the
+    //remainder we have rem processes with x+1 columns and (# of tasks - rem) processes with x columns.
     for(int i=0;i<numtasks;++i){
         if(i<numtasks-(n_total%numtasks)){
-            col_sendcounts[i] = n_total/numtasks + 1;
+            col_sendcounts[i] = n_total/numtasks + 1; //+1 because col array has n+1 elements
         }
         else{
             col_sendcounts[i] = n_total/numtasks + 2;
         }
     }
 
+    //Array that holds the displacement in the whole col array of each column subarray that we are going to send to each process
     int* col_displs = (int*)malloc(numtasks*sizeof(int));
     if(col_displs == NULL){
         printf("Couldn't allocate memory for col_displs in transmit_B_chunks, process %d\n",rank);
@@ -90,6 +105,7 @@ comp_matrix* transmit_B_chunks(comp_matrix* B, int rank){
         col_displs[i] = col_displs[i-1] + col_sendcounts[i-1] - 1;
     }
 
+    //Array that holds the number of elements that each row array of each process has
     int* row_sendcounts = (int*)malloc(numtasks*sizeof(int));
     if(row_sendcounts == NULL){
         printf("Couldn't allocate memory for row_sendcounts in transmit_B_chunks, process %d\n",rank);
@@ -105,6 +121,7 @@ comp_matrix* transmit_B_chunks(comp_matrix* B, int rank){
 
     MPI_Bcast(row_sendcounts,numtasks,MPI_INT,0,MPI_COMM_WORLD);
 
+    //Array that holds the displacement in the whole row matrix of each row subarray in each process
     int* row_displs = (int*)malloc(numtasks*sizeof(int));
     if(row_displs == NULL){
         printf("Couldn't allocate memory for row_displs in transmit_B_chunks, process %d\n",rank);
@@ -115,6 +132,7 @@ comp_matrix* transmit_B_chunks(comp_matrix* B, int rank){
         row_displs[i] = row_displs[i-1] + row_sendcounts[i-1];
     }
 
+    //n,nnz of each chunk
     B->nnz = row_sendcounts[rank];
     B->n = col_sendcounts[rank]-1;
 
@@ -133,6 +151,7 @@ comp_matrix* transmit_B_chunks(comp_matrix* B, int rank){
     }
 
     //Send row array
+    //In the root process the row array is stored in the same place as before
     if(rank==0){
         MPI_Scatterv(B->row,row_sendcounts,row_displs,MPI_UINT32_T,MPI_IN_PLACE,row_sendcounts[rank],MPI_UINT32_T,0,MPI_COMM_WORLD);
     }
@@ -149,11 +168,14 @@ comp_matrix* transmit_B_chunks(comp_matrix* B, int rank){
         }
         memcpy(new_row,B->row,B->nnz*sizeof(uint32_t));
         free(B->row);
-        //B->row = NULL; //isws xreastei?
         B->row = new_row;
     }
     
     //Send col array
+    //Because the sub-col arrays of each are overlapping in the col array of the whole matrix
+    //and we can't scatter overlapping parts of an array, we skip sending the first element of 
+    //each sub-array (which is the same as the last element of the sub-array of the previous chunk)
+    //and then we send this element separately to its process
     if(rank==0){
         for(int i=1;i<numtasks;++i){
             MPI_Isend(&B->col[col_displs[i]+1],col_sendcounts[i]-1,MPI_UINT32_T,i,0,MPI_COMM_WORLD,&reqs[i-1]);
@@ -169,14 +191,13 @@ comp_matrix* transmit_B_chunks(comp_matrix* B, int rank){
         }
         memcpy(new_col,B->col,(B->n+1)*sizeof(uint32_t));
         free(B->col);
-        //B->col = NULL //isws na xreiastei?
         B->col = new_col;
     }
     else{
-        MPI_Recv(&B->col[1],col_sendcounts[rank]-1,MPI_UINT32_T,0,0,MPI_COMM_WORLD,&status);
+        MPI_Recv(&B->col[1],col_sendcounts[rank]-1,MPI_UINT32_T,0,0,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
     }
 
-    //Send the extra element missing from the col arrays (except the one in root process)
+    //Send the extra element missing from the col array in each process (except the one in root process)
     if(rank!=numtasks-1){
         int next = rank+1;
         
@@ -188,6 +209,9 @@ comp_matrix* transmit_B_chunks(comp_matrix* B, int rank){
         MPI_Irecv(&B->col[0],1,MPI_UINT32_T,prev,1,MPI_COMM_WORLD,&req_extra[0]);
         MPI_Wait(&req_extra[0],MPI_STATUSES_IGNORE);
 
+        //We subtract from each element in the col array the value of the first element 
+        //because a col array should start from 0 and shouldn't take into account the number of
+        //elements that belong to previous chunks.
         int offset = B->col[0];
         for(int i=0;i<B->n+1;++i){
             B->col[i] -= offset;
@@ -203,20 +227,24 @@ comp_matrix* transmit_B_chunks(comp_matrix* B, int rank){
     return B;
 }
 
-
+/**
+ * This function creates the final csr matrix that is going to be returned.
+ * It consists of 2 parts:
+ * 1)Gathers all chunks of the product matrix back to the root process
+ * 2)Concats these chunks properly to create the final product matrix in csr format
+**/
 comp_matrix* concat_C_chunks(comp_matrix* result, int rank, int numtasks, int n_total){
 
     MPI_Request rec_reqs[2*(numtasks-1)];
     MPI_Request send_reqs[2];
 
-    uint32_t* chunks_nnz = NULL;
-    uint32_t* chunks_n = NULL;
-    uint32_t* offset = NULL;
+    uint32_t* chunks_nnz = NULL;    //Array holding the number of non-zero elements in each chunk
+    uint32_t* chunks_n = NULL;      //Array holding the number of columns in each chunk
+    uint32_t* offset = NULL;        
 
-    comp_matrix* C = NULL;
+    comp_matrix* C = NULL;  //Final matrix
 
     if(rank==0){
-        //n of each chunk
         chunks_n = (uint32_t*)malloc(numtasks*sizeof(uint32_t));
         if(chunks_n == NULL){
             printf("Couldn't allocate memory for chunks_n in concat_C_chunks.\n");
@@ -238,6 +266,8 @@ comp_matrix* concat_C_chunks(comp_matrix* result, int rank, int numtasks, int n_
         }
     }
 
+    //If the product chunk of a process has zero-elements only, temporarily create a chunk in csr format
+    //so that the final matrix is properly computed
     if(result == NULL){
         result = (comp_matrix*)malloc(sizeof(comp_matrix));
         if(result == NULL){
@@ -256,10 +286,12 @@ comp_matrix* concat_C_chunks(comp_matrix* result, int rank, int numtasks, int n_
         }
     }
 
+    //Part 1: Gather all chunks of the product matrix back to the root process
+
     //nnz of each chunk
     MPI_Gather(&result->nnz,1,MPI_UINT32_T,chunks_nnz,1,MPI_UINT32_T,0,MPI_COMM_WORLD);
 
-    //Send cols and rows
+    //Send the col and row arrays to the root process
     if(rank!=0){
         MPI_Isend(result->row,n_total+1,MPI_UINT32_T,0,2*rank,MPI_COMM_WORLD,&send_reqs[0]);
         MPI_Isend(result->col,result->nnz,MPI_UINT32_T,0,2*rank+1,MPI_COMM_WORLD,&send_reqs[1]);
@@ -271,6 +303,7 @@ comp_matrix* concat_C_chunks(comp_matrix* result, int rank, int numtasks, int n_
 
     if(rank==0){
 
+        //Array that holds the chunks
         comp_matrix** chunks = (comp_matrix**)malloc(numtasks*sizeof(comp_matrix*));
         if(chunks == NULL){
             printf("Couldn't allocate memory for chunks in concat_C_chunks.\n");
@@ -315,7 +348,8 @@ comp_matrix* concat_C_chunks(comp_matrix* result, int rank, int numtasks, int n_
 
         MPI_Waitall(2*(numtasks-1),rec_reqs,MPI_STATUSES_IGNORE);
 
-        //Create the final product csr matrix
+
+        //Part 2: Concatenate the chunks to create the final product csr matrix
         
         uint32_t total_nnz = 0;     //Total number of non-zero elements in the whole matrix
         for(int i=0;i<numtasks;++i){
@@ -328,9 +362,11 @@ comp_matrix* concat_C_chunks(comp_matrix* result, int rank, int numtasks, int n_
 
         C = new_comp_matrix(total_nnz,n_total,"csr");
 
-        uint32_t nnz_count=0;    //number of non-zero elements found up to this point
-        uint32_t row_in_chunk_start, row_in_chunk_end;
+        uint32_t nnz_count=0;    //Number of non-zero elements found up to this point
+        uint32_t row_in_chunk_start, row_in_chunk_end;  //First and last element in a row of a chunk
 
+        //Array that holds the offset of the first column of each chunk from the
+        //first column of the whole final matrix
         offset = (uint32_t*)malloc(numtasks*sizeof(uint32_t));
         if(offset == NULL){
             printf("Couldn't allocate memory for offset in concat_C_chunks.\n");
@@ -341,13 +377,18 @@ comp_matrix* concat_C_chunks(comp_matrix* result, int rank, int numtasks, int n_
             offset[i] = offset[i-1]+chunks[i-1]->n;
         }
 
-        C->row[0] = 0;
 
+        //Fill in the row and col arrays of the whole matrix
+        C->row[0] = 0;
+        
+        //For each row ff the chunks
         for(uint32_t i=0;i<n_total;++i){
+            //For each chunk
             for(uint32_t j=0;j<numtasks;++j){
                 row_in_chunk_start = chunks[j]->row[i];
                 row_in_chunk_end = chunks[j]->row[i+1];
 
+                //For each chunk in row i of chunk j
                 for(uint32_t k=row_in_chunk_start;k<row_in_chunk_end;++k){
                     C->col[nnz_count] = chunks[j]->col[k] + offset[j];
 
@@ -372,17 +413,23 @@ comp_matrix* concat_C_chunks(comp_matrix* result, int rank, int numtasks, int n_
 }
 
 
+/**
+ * Non-blocked MPI-parallelized implementation of the BMM
+**/
 comp_matrix* nonblocked_bmm_parallel_2(comp_matrix* A, comp_matrix* B, int rank){
 
     int numtasks;
     MPI_Comm_size(MPI_COMM_WORLD,&numtasks);
 
+    //Send matrix A to all processes
     A = transmit_A(A,rank);
 
+    //Send a chunk of B to each process
     B = transmit_B_chunks(B,rank);
 
     comp_matrix* C_chunk;
 
+    //No reason to calculate the product of A and B if B is zero
     if(B == NULL){
         C_chunk = NULL;
     }
@@ -390,6 +437,7 @@ comp_matrix* nonblocked_bmm_parallel_2(comp_matrix* A, comp_matrix* B, int rank)
         C_chunk = bmm_seq(A,B,0);
     }
 
+    //Concatenate the product chunks of each process to create the final product matrix
     comp_matrix* C = concat_C_chunks(C_chunk,rank,numtasks,A->n);
 
     free_comp_matrix(A);
@@ -402,6 +450,9 @@ comp_matrix* nonblocked_bmm_parallel_2(comp_matrix* A, comp_matrix* B, int rank)
 /* ------------ Functions for the blocked parallel implementation ------------- */
 
 
+/**
+ * Similar to the transmit_A function with the difference that now A is in blocked csr format
+**/
 block_comp_matrix* transmit_blocked_A(block_comp_matrix* A, int rank){
 
     if(rank!=0){
@@ -412,6 +463,7 @@ block_comp_matrix* transmit_blocked_A(block_comp_matrix* A, int rank){
         }
     }
 
+    //Send size, real dimension and number of non-zero elements of A to all processes
     MPI_Bcast(&A->n_b,1,MPI_UINT32_T,0,MPI_COMM_WORLD);
     MPI_Bcast(&A->nnz_blocks,1,MPI_UINT32_T,0,MPI_COMM_WORLD);
     MPI_Bcast(&A->real_dim,1,MPI_UINT32_T,0,MPI_COMM_WORLD);
@@ -439,9 +491,11 @@ block_comp_matrix* transmit_blocked_A(block_comp_matrix* A, int rank){
         }
     }
 
+    //Send block row and block column arrays to each process
     MPI_Bcast(A->block_col,A->nnz_blocks,MPI_UINT32_T,0,MPI_COMM_WORLD);
     MPI_Bcast(A->block_row,A->n_b+1,MPI_UINT32_T,0,MPI_COMM_WORLD);
 
+    //Send all blocks to all processes (each block is in csr format)
     for(int i=0;i<A->nnz_blocks;++i){
         A->blocks[i] = transmit_A(A->blocks[i],rank);
     }
@@ -450,6 +504,10 @@ block_comp_matrix* transmit_blocked_A(block_comp_matrix* A, int rank){
 }
 
 
+/**
+ * Similar to transmit_B_chunks but now B is in blocked csc format. The split now is done on
+ * a block level (stripes of block columns)
+**/
 block_comp_matrix* transmit_blocked_B_chunks(block_comp_matrix* B, int rank){
 
     if(rank!=0){
@@ -467,9 +525,9 @@ block_comp_matrix* transmit_blocked_B_chunks(block_comp_matrix* B, int rank){
     MPI_Request req_extra[numtasks-1];
     MPI_Status status;
 
-    uint32_t n_b_total;
-    uint32_t real_dim;
-    uint32_t total_nnz_blocks;
+    uint32_t n_b_total;         //Number of block rows(columns) of the whole matrix B
+    uint32_t real_dim;          //Real dimension of the whole matrix B
+    uint32_t total_nnz_blocks;  //Number of non-zero blocks of the whole matrix B
 
     if(rank==0){
         n_b_total = B->n_b;
@@ -481,11 +539,14 @@ block_comp_matrix* transmit_blocked_B_chunks(block_comp_matrix* B, int rank){
     MPI_Bcast(&real_dim,1,MPI_UINT32_T,0,MPI_COMM_WORLD);
     B->real_dim = real_dim;
 
+    //Array that stores the number of block columns each chunk has
     int* block_col_sendcounts = (int*)malloc(numtasks*sizeof(int));
     if(block_col_sendcounts == NULL){
         printf("Couldn't allocate memory for block_col_sendcounts in transmit_blocked_B_chunks, process %d\n",rank);
         exit(-1);
     }
+
+    //We use the same technique as in transmit_B_chunks to achieve a more even split of the block columns
     for(int i=0;i<numtasks;++i){
         if(i<numtasks-(n_b_total%numtasks)){
             block_col_sendcounts[i] = n_b_total/numtasks + 1;
@@ -495,6 +556,7 @@ block_comp_matrix* transmit_blocked_B_chunks(block_comp_matrix* B, int rank){
         }
     }
 
+    //Array that holds the displacement in the whole block col array of each block column subarray that we are going to send to each process
     int* block_col_displs = (int*)malloc(numtasks*sizeof(int));
     if(block_col_displs == NULL){
         printf("Couldn't allocate memory for block_col_displs in transmit_blocked_B_chunks, process %d\n",rank);
@@ -506,6 +568,7 @@ block_comp_matrix* transmit_blocked_B_chunks(block_comp_matrix* B, int rank){
         block_col_displs[i] = block_col_displs[i-1] + block_col_sendcounts[i-1] - 1;
     }
 
+    //Array that holds the number of nnz-blocks that each block row array of each process has
     int* block_row_sendcounts = (int*)malloc(numtasks*sizeof(int));
     if(block_row_sendcounts == NULL){
         printf("Couldn't allocate memory for block_row_sendcounts in transmit_blocked_B_chunks, process %d\n",rank);
@@ -521,6 +584,7 @@ block_comp_matrix* transmit_blocked_B_chunks(block_comp_matrix* B, int rank){
 
     MPI_Bcast(block_row_sendcounts,numtasks,MPI_INT,0,MPI_COMM_WORLD);
 
+    //Array that holds the displacement in the whole block row matrix of each block row subarray in each process
     int* block_row_displs = (int*)malloc(numtasks*sizeof(int));
     if(block_row_displs == NULL){
         printf("Couldn't allocate memory for block_row_displs in transmit_blocked_B_chunks, process %d\n",rank);
@@ -561,7 +625,8 @@ block_comp_matrix* transmit_blocked_B_chunks(block_comp_matrix* B, int rank){
         }
     }
 
-    //Send block_row array
+    //Send block row array
+    //In the root process the block row array is stored in the same place as before
     if(rank==0){
         MPI_Scatterv(B->block_row,block_row_sendcounts,block_row_displs,MPI_UINT32_T,MPI_IN_PLACE,block_row_sendcounts[rank],MPI_UINT32_T,0,MPI_COMM_WORLD);
     }
@@ -569,7 +634,7 @@ block_comp_matrix* transmit_blocked_B_chunks(block_comp_matrix* B, int rank){
         MPI_Scatterv(NULL,block_row_sendcounts,block_row_displs,MPI_UINT32_T,B->block_row,block_row_sendcounts[rank],MPI_UINT32_T,0,MPI_COMM_WORLD);
     }
 
-    //Reallocate block_row array in root process to the new size
+    //Reallocate block row array in root process to the new size
     if(rank==0){
         uint32_t* new_block_row = (uint32_t*)malloc(B->nnz_blocks*sizeof(uint32_t));
         if(new_block_row == NULL){
@@ -578,11 +643,12 @@ block_comp_matrix* transmit_blocked_B_chunks(block_comp_matrix* B, int rank){
         }
         memcpy(new_block_row,B->block_row,B->nnz_blocks*sizeof(uint32_t));
         free(B->block_row);
-        //B->row = NULL; //isws xreastei?
         B->block_row = new_block_row;
     }
 
-    //Send block_col array
+    //Send block col array
+    //Here the first element of each sub-array is missing too (as in transmit_B_chuncks)
+    //in order to avoid overlapping. The extra element is then sent separately.
     if(rank==0){
         for(int i=1;i<numtasks;++i){
             MPI_Isend(&B->block_col[block_col_displs[i]+1],block_col_sendcounts[i]-1,MPI_UINT32_T,i,0,MPI_COMM_WORLD,&reqs[i-1]);
@@ -590,7 +656,7 @@ block_comp_matrix* transmit_blocked_B_chunks(block_comp_matrix* B, int rank){
 
         MPI_Waitall(numtasks-1,reqs,MPI_STATUSES_IGNORE);
 
-        //Reallocate block_col array in root process to the new size
+        //Reallocate block col array in root process to the new size
         uint32_t* new_block_col = (uint32_t*)malloc((B->n_b+1)*sizeof(uint32_t));
         if(new_block_col == NULL){
             printf("Couldn't allocate memory for new_block_col in transmit_blocked_B_chunks, process %d\n",rank);
@@ -598,14 +664,13 @@ block_comp_matrix* transmit_blocked_B_chunks(block_comp_matrix* B, int rank){
         }
         memcpy(new_block_col,B->block_col,(B->n_b+1)*sizeof(uint32_t));
         free(B->block_col);
-        //B->col = NULL //isws na xreiastei?
         B->block_col = new_block_col;
     }
     else{
         MPI_Recv(&B->block_col[1],block_col_sendcounts[rank]-1,MPI_UINT32_T,0,0,MPI_COMM_WORLD,&status);
     }
 
-    //Send the extra element missing from the block_col arrays (except the one in root process)
+    //Send the extra element missing from the block col array of each process (except the one in root process)
     if(rank!=numtasks-1){
         int next = rank+1;
         
@@ -617,6 +682,9 @@ block_comp_matrix* transmit_blocked_B_chunks(block_comp_matrix* B, int rank){
         MPI_Irecv(&B->block_col[0],1,MPI_UINT32_T,prev,1,MPI_COMM_WORLD,&req_extra[0]);
         MPI_Wait(&req_extra[0],MPI_STATUSES_IGNORE);
 
+        //We subtract from each element in the block col array the value of the first element 
+        //because a block col array should start from 0 and shouldn't take into account the number of
+        //blocks that belong to previous chunks.
         int offset = B->block_col[0];
         for(int i=0;i<B->n_b+1;++i){
             B->block_col[i] -= offset;
@@ -630,6 +698,7 @@ block_comp_matrix* transmit_blocked_B_chunks(block_comp_matrix* B, int rank){
     //Send blocks
     if(rank!=0){
         for(int i=0;i<B->nnz_blocks;++i){
+            //First send n,nnz so we know how much memory to allocate for the row and col arrays
             MPI_Irecv(&B->blocks[i]->nnz,1,MPI_UINT32_T,0,4*i,MPI_COMM_WORLD,&blocks_req[0]);
             MPI_Irecv(&B->blocks[i]->n,1,MPI_UINT32_T,0,4*i+1,MPI_COMM_WORLD,&blocks_req[1]);
 
@@ -673,7 +742,7 @@ block_comp_matrix* transmit_blocked_B_chunks(block_comp_matrix* B, int rank){
             }
         }
 
-        //Realloc blocks
+        //Free the blocks that don't belong to the root process and reallocate blocks array to its chunk size
         for(int i=B->nnz_blocks;i<total_nnz_blocks;++i){
             free_comp_matrix(B->blocks[i]);
         }
@@ -698,6 +767,9 @@ block_comp_matrix* transmit_blocked_B_chunks(block_comp_matrix* B, int rank){
 }
 
 
+/**
+ * Similar to the concat_C_functions but now the chunks and the returned matrix are in blocked csr format.
+**/
 block_comp_matrix* concat_blocked_C_chunks(block_comp_matrix* result, int rank, int numtasks, int n_b_total){
 
     MPI_Request send_reqs[2];
@@ -707,14 +779,13 @@ block_comp_matrix* concat_blocked_C_chunks(block_comp_matrix* result, int rank, 
     MPI_Request block_rec_reqs[2];
     MPI_Request block_rec_reqs_2[2];
 
-    uint32_t* chunks_nnz_blocks = NULL;
-    uint32_t* chunks_n_b = NULL;
+    uint32_t* chunks_nnz_blocks = NULL; //Array holding the number of non-zero blocks in each chunk
+    uint32_t* chunks_n_b = NULL;        //Array holding the number of block columns in each chunk
     uint32_t* offset = NULL;
 
-    block_comp_matrix* C = NULL;
+    block_comp_matrix* C = NULL;        //Final matrix
 
     if(rank==0){
-        //n_b of each chunk
         chunks_n_b = (uint32_t*)malloc(numtasks*sizeof(uint32_t));
         if(chunks_n_b == NULL){
             printf("Couldn't allocate memory for chunks_n_b in concat_blocked_C_chunks.\n");
@@ -736,6 +807,8 @@ block_comp_matrix* concat_blocked_C_chunks(block_comp_matrix* result, int rank, 
         }
     }
 
+    //If the product chunk of a process has zero-elements blocks only, temporarily create a chunk in block csr format
+    //so that the final matrix is properly computed
     if(result == NULL){
         result = (block_comp_matrix*)malloc(sizeof(block_comp_matrix));
         if(result == NULL){
@@ -761,6 +834,8 @@ block_comp_matrix* concat_blocked_C_chunks(block_comp_matrix* result, int rank, 
         }
     }
 
+    //Part 1: Gather all chunks of the product matrix back to the root process
+
     //nnz blocks of each chunk
     MPI_Gather(&result->nnz_blocks,1,MPI_UINT32_T,chunks_nnz_blocks,1,MPI_UINT32_T,0,MPI_COMM_WORLD);
 
@@ -784,6 +859,7 @@ block_comp_matrix* concat_blocked_C_chunks(block_comp_matrix* result, int rank, 
 
     if(rank==0){
 
+        //Array that holds the chunks
         block_comp_matrix** chunks = (block_comp_matrix**)malloc(numtasks*sizeof(block_comp_matrix*));
         if(chunks == NULL){
             printf("Couldn't allocate memory for chunks in concat_blocked_C_chunks.\n");
@@ -819,6 +895,7 @@ block_comp_matrix* concat_blocked_C_chunks(block_comp_matrix* result, int rank, 
             chunks[i]->n_b = chunks_n_b[i];
             chunks[i]->real_dim = result->real_dim;
 
+            //In the root process just copy the chunk from the result to the chunk array
             if(i==0){
                 memcpy(chunks[i]->block_col,result->block_col,chunks[i]->nnz_blocks*sizeof(uint32_t));
                 memcpy(chunks[i]->block_row,result->block_row,(n_b_total+1)*sizeof(uint32_t));
@@ -849,12 +926,15 @@ block_comp_matrix* concat_blocked_C_chunks(block_comp_matrix* result, int rank, 
                     memcpy(chunks[i]->blocks[j]->row,result->blocks[j]->row,(chunks[i]->blocks[j]->n+1)*sizeof(uint32_t));
                 }
             }
+
+            //In the other processes, send the chunk to the root process
             else{
                 MPI_Irecv(chunks[i]->block_row,n_b_total+1,MPI_UINT32_T,i,2*i,MPI_COMM_WORLD,&rec_reqs[0]);
                 MPI_Irecv(chunks[i]->block_col,chunks[i]->nnz_blocks,MPI_UINT32_T,i,2*i+1,MPI_COMM_WORLD,&rec_reqs[1]);
 
                 MPI_Waitall(2,rec_reqs,MPI_STATUSES_IGNORE);
 
+                //Send each block one by one
                 for(int j=0;j<chunks[i]->nnz_blocks;++j){
                     chunks[i]->blocks[j] = (comp_matrix*)malloc(sizeof(comp_matrix));
                     if(chunks[i]->blocks[j] == NULL){
@@ -891,7 +971,8 @@ block_comp_matrix* concat_blocked_C_chunks(block_comp_matrix* result, int rank, 
         free(chunks_nnz_blocks);
         free(chunks_n_b); 
 
-        //Create the final matrix to be returned
+        //Part 2: Concatenate the chunks to create the final product block csr matrix
+
         uint32_t total_nnz_blocks = 0;     //Total number of non-zero blocks in the whole matrix
         for(int i=0;i<numtasks;++i){
             total_nnz_blocks += chunks[i]->nnz_blocks;
@@ -901,6 +982,7 @@ block_comp_matrix* concat_blocked_C_chunks(block_comp_matrix* result, int rank, 
             return NULL;
         }
 
+        //Matrix to be returned
         C = (block_comp_matrix*)malloc(sizeof(block_comp_matrix));
         if(C == NULL){
             printf("Couldn't allocate memory for C in concat_blocked_C_chunks.\n");
@@ -930,8 +1012,10 @@ block_comp_matrix* concat_blocked_C_chunks(block_comp_matrix* result, int rank, 
         }
         uint32_t nnz_block_count = 0;   //Number of non-zero blocks found up to this point
         
-        uint32_t block_row_in_chunk_start, block_row_in_chunk_end;
+        uint32_t block_row_in_chunk_start, block_row_in_chunk_end;  //First and last block in a block row of a chunk
 
+        //Array that holds the offset of the first block column of each chunk from the
+        //first block column of the whole final matrix
         offset = (uint32_t*)malloc(numtasks*sizeof(uint32_t));
         if(offset == NULL){
             printf("Couldn't allocate memory for offset in concat_blocked_C_chunks.\n");
@@ -942,11 +1026,15 @@ block_comp_matrix* concat_blocked_C_chunks(block_comp_matrix* result, int rank, 
             offset[i] = offset[i-1]+chunks[i-1]->n_b;
         }
 
+        //Fill in the block row block col and blocks arrays of the whole matrix
         C->block_row[0] = 0;
 
+        //For each block row of the chunks
         for(uint32_t i=0;i<n_b_total;++i){
+            //For each chunk
             for(uint32_t j=0;j<numtasks;++j){
-
+                
+                //If chunk is zero skip it
                 if(chunks[j]->nnz_blocks == 0){
                     continue;
                 }
@@ -954,6 +1042,7 @@ block_comp_matrix* concat_blocked_C_chunks(block_comp_matrix* result, int rank, 
                 block_row_in_chunk_start = chunks[j]->block_row[i];
                 block_row_in_chunk_end = chunks[j]->block_row[i+1];
 
+                //For each block in block row i of chunk j
                 for(uint32_t k=block_row_in_chunk_start;k<block_row_in_chunk_end;++k){
                     C->block_col[nnz_block_count] = chunks[j]->block_col[k] + offset[j];
 
@@ -1003,6 +1092,9 @@ block_comp_matrix* concat_blocked_C_chunks(block_comp_matrix* result, int rank, 
 }
 
 
+/**
+ * Blocked MPI-parallelized implementation of the BMM
+**/
 block_comp_matrix* blocked_bmm_parallel_2(block_comp_matrix* A, block_comp_matrix* B, int rank){
 
     struct timespec begin, end;
@@ -1016,6 +1108,7 @@ block_comp_matrix* blocked_bmm_parallel_2(block_comp_matrix* A, block_comp_matri
     // Start timer
     clock_gettime(CLOCK_MONOTONIC, &begin);
 
+    //Send matrix A to all processes
     A = transmit_blocked_A(A,rank);
 
     // End timer
@@ -1031,6 +1124,7 @@ block_comp_matrix* blocked_bmm_parallel_2(block_comp_matrix* A, block_comp_matri
     // Start timer
     clock_gettime(CLOCK_MONOTONIC, &begin);
 
+    //Send a chunk of B to each process
     B = transmit_blocked_B_chunks(B,rank);
 
     // End timer
@@ -1045,8 +1139,11 @@ block_comp_matrix* blocked_bmm_parallel_2(block_comp_matrix* A, block_comp_matri
 
     block_comp_matrix* C_chunk;
 
+    //Proved to be important because otherwise multiplication may start without each process 
+    //having the correct chunk of B
     MPI_Barrier(MPI_COMM_WORLD);
 
+    //No reason to calculate the product of A and B if B is zero
     if(B == NULL){
         C_chunk = NULL;
     }
@@ -1070,6 +1167,7 @@ block_comp_matrix* blocked_bmm_parallel_2(block_comp_matrix* A, block_comp_matri
     // Start timer
     clock_gettime(CLOCK_MONOTONIC, &begin);
 
+    //Concatenate the product chunks of each process to create the final product matrix
     block_comp_matrix* C = concat_blocked_C_chunks(C_chunk,rank,numtasks,A->n_b);
 
     // End timer
@@ -1232,6 +1330,7 @@ comp_matrix* nonblocked_bmm_parallel_filtered_2(comp_matrix* A, comp_matrix* B, 
 
 
 /* ------------ Functions for the blocked parallel filtered implementation ------------- */
+
 
 block_comp_matrix* snip_blocked_F(block_comp_matrix* F, uint32_t total_block_cols){
 

@@ -74,7 +74,6 @@ comp_matrix* concat_chunks(comp_matrix** chunks, int chunk_num, uint32_t n){
 }
 
 
-
 /**
  * Function that performs non-blocked BMM using thread parallelization with OpenMP.
  * Matrix A is split into chunks and each chunk is assigned to adifferent thread.
@@ -550,6 +549,7 @@ block_comp_matrix* blocked_bmm_parallel(block_comp_matrix* A, block_comp_matrix*
 
 
 /* ----------------- Functions for the filtered bmm parallel implementation -------------------- */
+
 
 /**
  * This function performs a filtered bmm according to matrix F, 
