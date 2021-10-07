@@ -5,6 +5,9 @@
 #include <string.h>
 
 
+/*---------------- Functions for the non-blocked serial implementation -------------------*/
+
+
 /**
  * Function that takes two matrices A and B in compressed format and produces
  * the product of those matrices.
@@ -197,6 +200,9 @@ matrix_2d *bmm_seq_2d(matrix_2d *A, matrix_2d *B) {
 }
 
 
+/*------------------- Functions for the blocked serial implementation --------------------*/
+
+
 /**
  * Function that applies element-wise union in two matrices A and B.
  * Both A and B are in csr format.
@@ -209,11 +215,11 @@ comp_matrix* block_union(comp_matrix* A, comp_matrix* B){
     uint32_t b = B->n;
 
 
-    uint32_t A_row_end;     //index of the last element in a specific row of A
-    uint32_t A_row_ptr;     //used to iterate through the elements of a row in A
+    uint32_t A_row_end;     //Index of the last element in a specific row of A
+    uint32_t A_row_ptr;     //Used to iterate through the elements of a row in A
 
-    uint32_t B_row_end;     //index of the last element in a specific row of B
-    uint32_t B_row_ptr;     //used to iterate through the elements of a row in B
+    uint32_t B_row_end;     //Index of the last element in a specific row of B
+    uint32_t B_row_ptr;     //Used to iterate through the elements of a row in B
 
     //If A is NULL and B is not NULL, then returned matrix is same as B
     if(A == NULL){
