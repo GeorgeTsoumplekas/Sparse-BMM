@@ -1360,13 +1360,9 @@ comp_matrix* nonblocked_bmm_parallel_filtered_2(comp_matrix* A, comp_matrix* B, 
 
 /* ------------ Functions for the blocked parallel filtered implementation ------------- */
 
-<<<<<<< HEAD
 /**
  * Function similar to snip_F function with the difference that now F is in blocked csr format.
 **/
-=======
-
->>>>>>> refs/remotes/origin/main
 block_comp_matrix* snip_blocked_F(block_comp_matrix* F, uint32_t total_block_cols){
 
     // Find the rank and the number of processes

@@ -158,48 +158,6 @@ comp_matrix *bmm_filtered_seq(comp_matrix *A, comp_matrix *B, comp_matrix *F, ui
 }
 
 
-/**
- * Test function for small matrices.
- * Performs the traditional matrix multiplication where the matrices are stored in the
- * classic format.
-**/
-matrix_2d *bmm_seq_2d(matrix_2d *A, matrix_2d *B) {
-    int rows = A->rows;
-    int cols = B->cols;
-
-    // Initialize the matrix that holds the product
-    uint32_t **C = (uint32_t **)malloc(rows * sizeof(uint32_t *));
-    for (uint32_t i = 0; i < rows; i++) {
-        C[i] = (uint32_t *)malloc(cols * sizeof(uint32_t));
-    }
-
-    // Run every element of the matrix C
-    for (int i = 0; i < rows; i++) {
-        for (int j = 0; j < cols; j++) {
-            for (int k = 0; k < A->cols; k++) {
-                if (A->mat[i][k] == 0 || B->mat[k][j] == 0) {
-                    C[i][j] = 0;
-                } else {
-                    C[i][j] = 1;
-                    break;
-                }
-            }
-        }
-    }
-
-    matrix_2d *c_mat = (matrix_2d *)malloc(sizeof(matrix_2d));
-    if(c_mat == NULL){
-        printf("Couldn't allocate memory for c_mat in bmm_seq_2d.\n");
-        exit(-1);
-    }
-    c_mat->cols = cols;
-    c_mat->rows = rows;
-    c_mat->mat = C;
-
-    return c_mat;
-}
-
-
 /*------------------- Functions for the blocked serial implementation --------------------*/
 
 
