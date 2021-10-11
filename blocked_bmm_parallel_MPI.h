@@ -1167,6 +1167,8 @@ block_comp_matrix* blocked_bmm_parallel_2(block_comp_matrix* A, block_comp_matri
     // Start timer
     clock_gettime(CLOCK_MONOTONIC, &begin);
 
+    MPI_Barrier(MPI_COMM_WORLD);
+
     //Concatenate the product chunks of each process to create the final product matrix
     block_comp_matrix* C = concat_blocked_C_chunks(C_chunk,rank,numtasks,A->n_b);
 

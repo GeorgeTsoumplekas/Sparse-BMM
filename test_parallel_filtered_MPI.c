@@ -13,7 +13,7 @@ int main(int argc, char* argv[]){
     double elapsed;
 
     int initialized, finalized;
-    int rank;
+    int rank, numtasks;
 
     char* filename_C = NULL;
 
@@ -47,6 +47,8 @@ int main(int argc, char* argv[]){
             exit(-1);
         }
 
+        printf("Number of processes: %d\n",numtasks);
+
         char* filename_A = argv[1];
         char* filename_B = argv[2];
         char* filename_F = argv[3];
@@ -67,6 +69,12 @@ int main(int argc, char* argv[]){
         elapsed = seconds + nanoseconds * 1e-9;
 
         printf("\nTime elapsed for A txt->COO: %.5f seconds.\n", elapsed);
+
+        //It is necessary that b * # of processes less or equal than n
+        if(b*numtasks>A_coo->n){
+            printf("ERROR: Condition that b * # of processes <= n is not held. Please try again with differend parameters.\n");
+            exit(-1);
+        }
 
         // Start timer
         clock_gettime(CLOCK_MONOTONIC, &begin);

@@ -41,6 +41,8 @@ int main(int argc, char* argv[]){
         char* filename_B = argv[2];
         filename_C = argv[3];
 
+        printf("Number of processes: %d\n",numtasks);
+
         b = atoi(argv[4]);
         printf("b=%d\n",b);
 
@@ -56,6 +58,12 @@ int main(int argc, char* argv[]){
         elapsed = seconds + nanoseconds * 1e-9;
 
         printf("\nTime elapsed for A txt->COO: %.5f seconds.\n", elapsed);
+
+         //It is necessary that b * # of processes less or equal than n
+        if(b*numtasks>A_coo->n){
+            printf("ERROR: Condition that b * # of processes <= n is not held. Please try again with differend parameters.\n");
+            exit(-1);
+        }
 
         // Start timer
         clock_gettime(CLOCK_MONOTONIC, &begin);

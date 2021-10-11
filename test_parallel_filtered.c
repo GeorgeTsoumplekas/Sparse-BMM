@@ -40,6 +40,12 @@ int main(int argc, char* argv[]) {
 
     printf("\nTime elapsed for A txt->COO: %.5f seconds.\n", elapsed);
 
+    //It is necessary that b * # of threads less or equal than n
+    if(b*thread_num>A_coo->n){
+        printf("ERROR: Condition that b * # of threads <= n is not held. Please try again with differend parameters.\n");
+        exit(-1);
+    }
+
     // Start timer
     clock_gettime(CLOCK_MONOTONIC, &begin);
 

@@ -13,7 +13,7 @@ int main(int argc, char* argv[]){
     double elapsed;
 
     int initialized, finalized;
-    int rank;
+    int rank, numtasks;
 
     char* filename_C = NULL;
 
@@ -31,16 +31,17 @@ int main(int argc, char* argv[]){
     }
 
     thread_num = atoi(argv[4]);
-    if(rank==0){
-        printf("You have chosen %d threads.\n",thread_num);
-    }
 
     MPI_Comm_rank(MPI_COMM_WORLD,&rank);
+    MPI_Comm_size(MPI_COMM_WORLD,&numtasks);
 
     if(rank==0){
         char* filename_A = argv[1];
         char* filename_B = argv[2];
         filename_C = argv[3];
+        
+        printf("Number of processes: %d\n",numtasks);
+        printf("Number of threads in each process: %d.\n",thread_num);
 
         // Start timer
         clock_gettime(CLOCK_MONOTONIC, &begin);
