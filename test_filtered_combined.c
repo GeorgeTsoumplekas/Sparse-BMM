@@ -8,7 +8,7 @@ int main(int argc, char* argv[]){
     double elapsed;
 
     int initialized, finalized;
-    int rank;
+    int rank, numtasks;
 
     char* filename_C = NULL;
 
@@ -32,6 +32,7 @@ int main(int argc, char* argv[]){
     }
 
     MPI_Comm_rank(MPI_COMM_WORLD,&rank);
+    MPI_Comm_size(MPI_COMM_WORLD,&numtasks);
 
     if (rank==0){
         printf("\nThis file completes the filtered bmm with both MPI and OpenMP parallelization with simple and blocked matrices.\n");
@@ -47,17 +48,16 @@ int main(int argc, char* argv[]){
     }
 
     thread_num = atoi(argv[5]);
-    if(rank==0){
-        printf("You have chosen %d threads.\n",thread_num);
-    }
 
     if(rank==0){
         
-
         char* filename_A = argv[1];
         char* filename_B = argv[2];
         char* filename_F = argv[3];
         filename_C = argv[4];
+
+        printf("Number of processes: %d\n",numtasks);
+        printf("Number of threads in each process: %d.\n",thread_num);
         
         uint32_t b = atoi(argv[6]);
         printf("b=%d\n", b);
@@ -74,6 +74,18 @@ int main(int argc, char* argv[]){
         elapsed = seconds + nanoseconds * 1e-9;
 
         printf("\nTime elapsed for A txt->COO: %.5f seconds.\n", elapsed);
+
+        //It is necessary that b * # of processes less or equal than n
+        if(b*numtasks>A_coo->n){
+            printf("ERROR: Condition that b * # of processes <= n is not held. Please try again with differend parameters.\n");
+            exit(-1);
+        }
+
+        //It is necessary that b * # of threads less or equal than n
+        if(b*thread_num>A_coo->n){
+            printf("ERROR: Condition that b * # of threads <= n is not held. Please try again with differend parameters.\n");
+            exit(-1);
+        }
 
         // Start timer
         clock_gettime(CLOCK_MONOTONIC, &begin);

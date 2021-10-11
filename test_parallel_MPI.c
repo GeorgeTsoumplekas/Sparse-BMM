@@ -13,7 +13,7 @@ int main(int argc, char* argv[]){
     double elapsed;
 
     int initialized, finalized;
-    int rank;
+    int rank, numtasks;
 
     char* filename_C = NULL;
 
@@ -29,11 +29,14 @@ int main(int argc, char* argv[]){
     }
 
     MPI_Comm_rank(MPI_COMM_WORLD,&rank);
+    MPI_Comm_size(MPI_COMM_WORLD,&numtasks);
 
     if(rank==0){
         char* filename_A = argv[1];
         char* filename_B = argv[2];
         filename_C = argv[3];
+
+        printf("Number of processes: %d\n",numtasks);
 
         // Start timer
         clock_gettime(CLOCK_MONOTONIC, &begin);
