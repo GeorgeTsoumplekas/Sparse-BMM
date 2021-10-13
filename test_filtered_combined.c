@@ -232,35 +232,12 @@ int main(int argc, char* argv[]){
 
         printf("\nTime elapsed for blocked bmm filtered: %.5f seconds.\n", elapsed);
 
-        // Start timer
-        clock_gettime(CLOCK_MONOTONIC, &begin);
-
-        comp_matrix* C_csr_from_blocked = blocked2csr(C_blocked);
-
-        // End timer
-        clock_gettime(CLOCK_MONOTONIC, &end);
-        seconds = end.tv_sec - begin.tv_sec;
-        nanoseconds = end.tv_nsec - begin.tv_nsec;
-        elapsed = seconds + nanoseconds * 1e-9;
-
-        printf("\nTime elapsed for C blocked->CSR: %.5f seconds.\n\n", elapsed);
-
-        // Check result
-        uint32_t check = check_result(filename_C,C_csr_from_blocked);
-        if(check==0){
-            printf("Wrong result.\n");
-        }
-        else{
-            printf("Correct result.\n");
-        }
-
         free_coo(A_coo);
         free_coo(B_coo);
         free_coo(F_coo);
 
         free_comp_matrix(C_csr);
         free_block_comp_matrix(C_blocked);
-        free_comp_matrix(C_csr_from_blocked);
     }
 
 
