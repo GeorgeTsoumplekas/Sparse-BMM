@@ -1542,8 +1542,6 @@ block_comp_matrix* blocked_bmm_parallel_filtered_2(block_comp_matrix* A, block_c
 
     block_comp_matrix* C_chunk;
 
-    MPI_Barrier(MPI_COMM_WORLD);
-
     // Calculate the offset(real index) of the first block column of the reduced F matrix
     uint32_t offset;
     int remaining = n_b%numtasks;
@@ -1554,6 +1552,8 @@ block_comp_matrix* blocked_bmm_parallel_filtered_2(block_comp_matrix* A, block_c
         uint32_t previous_block_cols = (numtasks-remaining)*n_b/numtasks;
         offset = previous_block_cols + (rank-numtasks+remaining)*(n_b/numtasks+1);
     }
+
+    MPI_Barrier(MPI_COMM_WORLD);
 
     // Find the value of each chunk of C
     if(B == NULL){
@@ -1569,6 +1569,8 @@ block_comp_matrix* blocked_bmm_parallel_filtered_2(block_comp_matrix* A, block_c
             C_chunk->blocks[i]->col[j] = C_chunk->blocks[i]->col[j] - rank*C_chunk->blocks[i]->n;
         }
     }
+
+    MPI_Barrier(MPI_COMM_WORLD);
 
     // Concatenate the product chinks of each process to create the final product matrix
     block_comp_matrix* C = concat_blocked_C_chunks(C_chunk,rank,numtasks,F->n_b);
